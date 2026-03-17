@@ -74,6 +74,9 @@
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
     style="display: none;"
   >
+    <!-- Освещение, чтобы блоки были видны поверх видео с камеры -->
+    <a-entity light="type: ambient; intensity: 0.85"></a-entity>
+    <a-entity light="type: directional; intensity: 0.7; castShadow: false" position="2 8 5"></a-entity>
     <!-- Камера: Fake world anchor (gps-projected = первая позиция как origin), сглаживание ориентации -->
     <a-camera
       id="ar-camera"
@@ -194,11 +197,13 @@
         this.camera = document.querySelector('#ar-camera');
         this.poolSize = 12;
         this.blocks = [];
+        this.spawnDelay = 2500;  // не спавнить блоки и не проверять коллизию первые 2.5 с
         for (let i = 0; i < this.poolSize; i++) {
           const box = document.createElement('a-entity');
           box.setAttribute('geometry', 'primitive: box; width: 1.2; height: 1.2; depth: 1.2');
           box.setAttribute('material', 'color: #8B4513; metalness: 0.3; roughness: 0.7');
           box.setAttribute('visible', 'false');
+          box.setAttribute('position', '0 0 -999');  // далеко от камеры, иначе мгновенная коллизия при (0,0,0)
           this.sceneEl.appendChild(box);
           this.blocks.push({ el: box, active: false });
         }
@@ -217,6 +222,7 @@
       },
       tick: function (time, dt) {
         if (this.gameOver) return;
+        if (time < this.spawnDelay) return;  // даём время сориентироваться
         const delta = dt / 1000;
         const moveZ = this.data.blockSpeed * this.speedMultiplier * delta;
 
