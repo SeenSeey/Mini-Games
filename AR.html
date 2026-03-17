@@ -2,85 +2,93 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>AR Dodge Blocks</title>
+    <title>AR Dodge Blocks - Final Fix</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+    <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
+    
+    <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
+    
     <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; font-family: sans-serif; background: #000; }
+        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
         #overlay {
             position: fixed; inset: 0; background: rgba(0,0,0,0.9);
             display: flex; align-items: center; justify-content: center;
-            z-index: 9999; color: white; text-align: center; padding: 20px;
-            cursor: pointer;
+            z-index: 9999; color: white; text-align: center; cursor: pointer;
         }
-        .btn {
-            margin-top: 20px; padding: 12px 24px; background: #2196F3;
-            border: none; color: white; border-radius: 4px; font-weight: bold;
+        #status-bar {
+            position: fixed; bottom: 10px; left: 10px; right: 10px;
+            background: rgba(0,0,0,0.6); color: #0f0; padding: 5px;
+            font-family: monospace; font-size: 12px; z-index: 1000;
+            pointer-events: none;
         }
     </style>
 
     <script>
-        // ЛОГИКА РАЗРЕШЕНИЙ
+        // ФИКС: Создаем пустой объект THREEx, если библиотека его ждет
+        window.THREEx = window.THREEx || {};
+
+        function logStatus(msg) {
+            document.getElementById('status-bar').innerText = msg;
+            console.log("GAME LOG:", msg);
+        }
+
         async function startExperience() {
             const overlay = document.getElementById('overlay');
-            
-            // 1. Аудио
-            const ctx = THREE.AudioContext.getContext();
-            if (ctx.state === 'suspended') ctx.resume();
+            logStatus("Запрашиваю разрешения...");
 
             try {
-                // 2. Запрос GPS
-                if ("geolocation" in navigator) {
-                    await new Promise((resolve, reject) => {
-                        navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true });
-                    });
-                    console.log("GPS получен");
+                // 1. Audio
+                const ctx = THREE.AudioContext.getContext();
+                if (ctx.state === 'suspended') ctx.resume();
+
+                // 2. GPS
+                await new Promise((res, rej) => {
+                    navigator.geolocation.getCurrentPosition(res, rej, {enableHighAccuracy: true});
+                });
+
+                // 3. Gyro (для iOS)
+                if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) {
+                    await DeviceOrientationEvent.requestPermission();
                 }
 
-                // 3. Запрос Гироскопа (Критично для iOS 13+)
-                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                    const permission = await DeviceOrientationEvent.requestPermission();
-                    if (permission !== 'granted') {
-                        alert("Доступ к датчикам движения отклонен. Камера не будет вращаться.");
-                    }
-                }
-
-                // Если всё ок — скрываем оверлей
                 overlay.style.display = 'none';
-
-            } catch (err) {
-                console.error(err);
-                alert("Ошибка при получении разрешений. Убедись, что используешь HTTPS!");
+                logStatus("Доступ получен. Жду сигнал GPS...");
+            } catch (e) {
+                logStatus("Ошибка: " + e.message);
             }
         }
 
-        // КОМПОНЕНТ ИГРЫ
         AFRAME.registerComponent("ar-game", {
             init: function() {
                 this.score = 0;
                 this.gameOver = false;
                 this.blocks = [];
                 this.lastSpawnTime = 0;
-                
+                this.gpsReady = false;
+
                 this.camera = document.querySelector("[gps-new-camera]");
                 this.scoreText = document.querySelector("#scoreText");
-                this.gameOverPanel = document.querySelector("#gameOverPanel");
 
-                // Событие обновления позиции
-                window.addEventListener('gps-camera-update-position', () => {
-                    this.gpsReady = true;
-                    console.log("GPS позиция обновлена");
+                // Слушаем обновление координат
+                window.addEventListener('gps-camera-update-position', (e) => {
+                    if (!this.gpsReady) {
+                        this.gpsReady = true;
+                        logStatus("GPS Поймал! Начинаю спавн блоков...");
+                    }
                 });
+
+                // Запасной вариант: если через 5 секунд GPS не ответил, попробуем форсировать
+                setTimeout(() => {
+                    if (!this.gpsReady) logStatus("GPS тупит... Попробуй выйти на открытое место.");
+                }, 5000);
             },
 
             tick: function(time, timeDelta) {
                 if (this.gameOver || !this.gpsReady) return;
 
-                // Спавн раз в 4 секунды
                 if (time - this.lastSpawnTime > 4000) {
                     this.spawnBlock(time);
                     this.lastSpawnTime = time;
@@ -92,16 +100,15 @@
                     let b = this.blocks[i];
                     if (!b.el.object3D) continue;
 
-                    let distance = playerPos.distanceTo(b.el.object3D.position);
+                    let dist = playerPos.distanceTo(b.el.object3D.position);
 
-                    // Коллизия (1.5 метра)
-                    if (distance < 1.5 && distance > 0.1) {
+                    // Если блок только что появился, dist может быть 0. Игнорируем это.
+                    if (dist > 0.1 && dist < 2.0) {
                         this.onHit();
                         return;
                     }
 
-                    // Удаление через 12 секунд
-                    if (time - b.spawnTime > 12000) {
+                    if (time - b.spawnTime > 15000) {
                         this.onPassed(b.el, i);
                     }
                 }
@@ -111,62 +118,63 @@
                 const cam = this.camera.components["gps-new-camera"];
                 if (!cam || !cam.currentCoords) return;
 
-                // Блоки чуть дальше (0.0002 ~ 20 метров)
-                const lat = cam.currentCoords.latitude + (Math.random() - 0.5) * 0.0003;
-                const lon = cam.currentCoords.longitude + (Math.random() - 0.5) * 0.0003;
+                // Спавним чуть впереди (случайный разброс)
+                const lat = cam.currentCoords.latitude + (Math.random() - 0.5) * 0.0004;
+                const lon = cam.currentCoords.longitude + (Math.random() - 0.5) * 0.0004;
 
                 const block = document.createElement("a-entity");
-                block.setAttribute("geometry", "primitive: box; width: 2; height: 2; depth: 2");
-                block.setAttribute("material", "color: red; opacity: 0.8");
+                // Используем обычный куб, чтобы не зависеть от загрузки модели glb
+                block.setAttribute("geometry", "primitive: box; width: 1.5; height: 3; depth: 1.5");
+                block.setAttribute("material", "color: #ff0000; emissive: #300;");
                 block.setAttribute("gps-new-entity-place", `latitude: ${lat}; longitude: ${lon};`);
-
+                
                 this.el.sceneEl.appendChild(block);
                 this.blocks.push({ el: block, spawnTime: currentTime });
+                logStatus("Блок заспавнен! Всего: " + this.blocks.length);
             },
 
             onPassed: function(el, index) {
                 this.score++;
-                this.scoreText.setAttribute("troika-text", "value", `Очки: ${this.score}`);
+                this.scoreText.setAttribute("troika-text", "value", `Счет: ${this.score}`);
                 if (el.parentNode) el.parentNode.removeChild(el);
                 this.blocks.splice(index, 1);
             },
 
             onHit: function() {
                 this.gameOver = true;
-                this.gameOverPanel.setAttribute("visible", "true");
-                document.querySelector("#gameOverText").setAttribute("troika-text", "value", `КОНЕЦ ИГРЫ\nСчёт: ${this.score}`);
+                logStatus("GAME OVER! Твой счет: " + this.score);
+                document.querySelector("#gameOverPanel").setAttribute("visible", "true");
+                document.querySelector("#gameOverText").setAttribute("troika-text", "value", `ВРЕЗАЛСЯ!\nСчет: ${this.score}`);
             }
         });
     </script>
 </head>
 <body>
 
+    <div id="status-bar">Ожидание нажатия...</div>
+
     <div id="overlay" onclick="startExperience()">
         <div>
-            <h2>AR Dodge Game</h2>
-            <p>Для игры нужен доступ к камере и GPS.<br>Работать будет только через <b>HTTPS</b>.</p>
-            <div class="btn">ИГРАТЬ</div>
+            <h1>AR Dodge</h1>
+            <p>Нажми, чтобы активировать радар</p>
+            <div style="padding: 15px; background: #2196F3; border-radius: 8px;">ИГРАТЬ</div>
         </div>
     </div>
 
     <a-scene 
         embedded 
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false; trackingMethod: best;"
-        renderer="logarithmicDepthBuffer: true; antialias: true; alpha: true;">
+        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+        renderer="antialias: true; alpha: true;">
         
-        <a-assets>
-            <audio id="deathAudio" src="sounds/death.mp3" preload="auto"></audio>
-        </a-assets>
-
         <a-camera gps-new-camera="gpsMinDistance: 1" rotation-reader>
-            <a-entity id="scoreText" position="0 0.8 -2" 
-                      troika-text="value: Очки: 0; align: center; fontSize: 0.15; color: #fff; outlineWidth: 0.01;">
+            <a-entity id="scoreText" position="0 1 -2" 
+                      troika-text="value: Счет: 0; align: center; fontSize: 0.15; color: #fff;">
             </a-entity>
 
-            <a-entity id="gameOverPanel" visible="false" position="0 0 -2.1">
-                <a-plane width="2" height="1" color="black" opacity="0.9"></a-plane>
-                <a-entity id="gameOverText" position="0 0 0.01" 
-                          troika-text="value:; align: center; fontSize: 0.15; color: red;">
+            <a-entity id="gameOverPanel" visible="false" position="0 0 -2">
+                <a-plane width="2" height="1" color="#000" opacity="0.9"></a-plane>
+                <a-entity id="gameOverText" position="0 0 0.1" 
+                          troika-text="value:; align: center; fontSize: 0.15; color: #f00;">
                 </a-entity>
             </a-entity>
         </a-camera>
