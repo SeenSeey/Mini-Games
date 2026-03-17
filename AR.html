@@ -77,9 +77,13 @@
     arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
     style="display: none;"
   >
-    <!-- Освещение, чтобы блоки были видны поверх видео с камеры -->
-    <a-entity light="type: ambient; intensity: 0.85"></a-entity>
-    <a-entity light="type: directional; intensity: 0.7; castShadow: false" position="2 8 5"></a-entity>
+    <a-assets>
+      <a-asset-item id="obstacleModel" src="models/concrete_obstacle.glb"></a-asset-item>
+    </a-assets>
+    <!-- Яркое освещение для видимости моделей поверх камеры -->
+    <a-entity light="type: ambient; intensity: 1.1"></a-entity>
+    <a-entity light="type: directional; intensity: 1.2; castShadow: false" position="5 10 5"></a-entity>
+    <a-entity light="type: directional; intensity: 0.6; castShadow: false" position="-4 6 4"></a-entity>
     <!-- Камера: Fake world anchor (gps-projected = первая позиция как origin), сглаживание ориентации -->
     <a-camera
       id="ar-camera"
@@ -198,16 +202,17 @@
         this.gameStartTime = null;
         this.firstTickTime = null;
         this.blocks = [];
-        var self = this;
-        var colors = ['#FFD700', '#00FF7F', '#00BFFF', '#FF6347', '#9370DB', '#FF69B4'];
         for (var i = 0; i < this.data.numBlocks; i++) {
-          var box = document.createElement('a-entity');
-          box.setAttribute('geometry', 'primitive: box; width: 1.5; height: 1.5; depth: 1.5');
-          box.setAttribute('material', 'color: ' + colors[i % colors.length] + '; metalness: 0.2; roughness: 0.8');
-          box.setAttribute('visible', 'false');
-          box.setAttribute('position', '0 -100 0');
-          this.sceneEl.appendChild(box);
-          this.blocks.push({ el: box, collected: false });
+          var wrapper = document.createElement('a-entity');
+          wrapper.setAttribute('visible', 'false');
+          wrapper.setAttribute('position', '0 -100 0');
+          var model = document.createElement('a-entity');
+          model.setAttribute('gltf-model', '#obstacleModel');
+          model.setAttribute('scale', '2.8 2.8 2.8');
+          model.setAttribute('position', '0 0 0');
+          wrapper.appendChild(model);
+          this.sceneEl.appendChild(wrapper);
+          this.blocks.push({ el: wrapper, collected: false });
         }
         this.scoreEl = document.getElementById('score-panel');
         this.timerEl = document.getElementById('timer-panel');
@@ -216,12 +221,15 @@
         document.getElementById('btn-restart').addEventListener('click', function () { location.reload(); });
       },
       spawnBlocksAroundOrigin: function () {
-        var r = this.data.spawnRadius;
-        var y = 1.2;
+        var rFar = this.data.spawnRadius;
+        var rNear = 4;
+        var y = 1;
         for (var i = 0; i < this.blocks.length; i++) {
           var b = this.blocks[i];
-          var x = (Math.random() * 2 - 1) * r;
-          var z = (Math.random() * 2 - 1) * r;
+          var r = i < 10 ? rNear + Math.random() * 3 : rNear + Math.random() * (rFar - rNear);
+          var angle = Math.random() * Math.PI * 2;
+          var x = Math.cos(angle) * r;
+          var z = Math.sin(angle) * r;
           b.el.setAttribute('position', x + ' ' + y + ' ' + z);
           b.el.setAttribute('visible', 'true');
           b.collected = false;
