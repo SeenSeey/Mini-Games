@@ -12,6 +12,66 @@
 
 <script>
 AFRAME.registerComponent('game-logic', {
+    // init: function () {
+    //     this.score = 0;
+    //     this.blocks = [];
+    //     this.lastSpawn = 0;
+
+    //     this.camera = document.querySelector('[gps-new-camera]');
+    //     this.scoreText = document.querySelector("#scoreText");
+
+    //     // ===== GPS STATE =====
+    //     this.originSet = false;
+    //     this.originLat = 0;
+    //     this.originLon = 0;
+
+    //     this.smoothedLat = null;
+    //     this.smoothedLon = null;
+
+    //     this.useGPS = false;
+    //     this.alpha = 0.1; // сглаживание
+
+    //     document.getElementById('status').innerText = "Ожидание GPS...";
+
+    //     // слушаем GPS
+    //     window.addEventListener('gps-camera-update-position', (e) => {
+    //         let coords = e.detail.position;
+
+    //         if (!coords) return;
+
+    //         let lat = coords.latitude;
+    //         let lon = coords.longitude;
+
+    //         // ===== SMOOTHING =====
+    //         if (this.smoothedLat === null) {
+    //             this.smoothedLat = lat;
+    //             this.smoothedLon = lon;
+    //         } else {
+    //             this.smoothedLat += (lat - this.smoothedLat) * this.alpha;
+    //             this.smoothedLon += (lon - this.smoothedLon) * this.alpha;
+    //         }
+
+    //         // ===== SET ORIGIN =====
+    //         if (!this.originSet) {
+    //             this.originLat = this.smoothedLat;
+    //             this.originLon = this.smoothedLon;
+    //             this.originSet = true;
+    //             this.useGPS = true;
+
+    //             document.getElementById('status').innerText = "GPS зафиксирован (anchor установлен)";
+    //         }
+    //     });
+
+    //     // fallback если GPS плохой
+    //     setTimeout(() => {
+    //         if (!this.originSet) {
+    //             document.getElementById('status').innerText = "Нет GPS → локальный режим";
+    //             this.useGPS = false;
+    //             this.originSet = true;
+    //         }
+    //     }, 8000);
+    // },
+
     init: function () {
         this.score = 0;
         this.blocks = [];
@@ -20,56 +80,25 @@ AFRAME.registerComponent('game-logic', {
         this.camera = document.querySelector('[gps-new-camera]');
         this.scoreText = document.querySelector("#scoreText");
 
-        // ===== GPS STATE =====
+        this.scene = this.el.sceneEl;
+        this.sceneReady = false;
+
         this.originSet = false;
-        this.originLat = 0;
-        this.originLon = 0;
-
-        this.smoothedLat = null;
-        this.smoothedLon = null;
-
         this.useGPS = false;
-        this.alpha = 0.1; // сглаживание
 
-        document.getElementById('status').innerText = "Ожидание GPS...";
+        // ЖДЁМ СЦЕНУ
+        if (this.scene.hasLoaded) {
+            this.onSceneLoaded();
+        } else {
+            this.scene.addEventListener('loaded', () => this.onSceneLoaded());
+        }
+    },
 
-        // слушаем GPS
-        window.addEventListener('gps-camera-update-position', (e) => {
-            let coords = e.detail.position;
+    onSceneLoaded: function () {
+        this.sceneReady = true;
+        console.log("✅ Scene ready");
 
-            if (!coords) return;
-
-            let lat = coords.latitude;
-            let lon = coords.longitude;
-
-            // ===== SMOOTHING =====
-            if (this.smoothedLat === null) {
-                this.smoothedLat = lat;
-                this.smoothedLon = lon;
-            } else {
-                this.smoothedLat += (lat - this.smoothedLat) * this.alpha;
-                this.smoothedLon += (lon - this.smoothedLon) * this.alpha;
-            }
-
-            // ===== SET ORIGIN =====
-            if (!this.originSet) {
-                this.originLat = this.smoothedLat;
-                this.originLon = this.smoothedLon;
-                this.originSet = true;
-                this.useGPS = true;
-
-                document.getElementById('status').innerText = "GPS зафиксирован (anchor установлен)";
-            }
-        });
-
-        // fallback если GPS плохой
-        setTimeout(() => {
-            if (!this.originSet) {
-                document.getElementById('status').innerText = "Нет GPS → локальный режим";
-                this.useGPS = false;
-                this.originSet = true;
-            }
-        }, 8000);
+        document.getElementById('status').innerText = "Сцена готова";
     },
 
     tick: function (time, delta) {
@@ -144,12 +173,15 @@ AFRAME.registerComponent('game-logic', {
             pos.y = 1.5;
         }
 
+        if (!this.sceneReady) return; 
+
         let el = document.createElement('a-entity');
 
         el.setAttribute('geometry', 'primitive: box; width: 1.5; height: 3; depth: 1.5');
         el.setAttribute('material', 'color: red; opacity: 0.8; emissive: #ff0000');
 
-        this.el.sceneEl.appendChild(el);
+        this.scene.appendChild(el);
+
         el.object3D.position.copy(pos);
 
         let velocity = cam.position.clone().sub(pos).normalize().multiplyScalar(3);
@@ -213,8 +245,10 @@ body { margin:0; overflow:hidden; background:#000; }
     </div>
 </div>
 
-<a-scene embedded arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
-    <a-sky color="#111"></a-sky>
+<a-scene embedded arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+renderer="logarithmicDepthBuffer: true;"
+vr-mode-ui="enabled: false">
+    <!-- <a-sky color="#111"></a-sky> -->
 
     <a-entity light="type: ambient; intensity: 0.7"></a-entity>
     <a-entity light="type: directional; intensity: 0.8" position="1 1 1"></a-entity>
