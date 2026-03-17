@@ -1,187 +1,157 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>AR Dodge Blocks - Final Fix</title>
+    <meta charset="utf-8">
+    <title>AR Dodge Blocks - Stable Build</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-    <script src="https://aframe.io/releases/1.4.1/aframe.min.js"></script>
-    
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+
+    <script>
+        window.THREEx = window.THREEx || {};
+    </script>
+
     <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
     
     <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
 
     <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
+        body { margin: 0; overflow: hidden; background: #000; }
         #overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+            position: fixed; inset: 0; background: rgba(0,0,0,0.8);
             display: flex; align-items: center; justify-content: center;
-            z-index: 9999; color: white; text-align: center; cursor: pointer;
+            z-index: 9999; color: #fff; text-align: center; cursor: pointer;
+            font-family: sans-serif;
         }
-        #status-bar {
-            position: fixed; bottom: 10px; left: 10px; right: 10px;
-            background: rgba(0,0,0,0.6); color: #0f0; padding: 5px;
-            font-family: monospace; font-size: 12px; z-index: 1000;
-            pointer-events: none;
+        #ui-layer {
+            position: fixed; bottom: 20px; left: 20px; color: #0f0;
+            font-family: monospace; z-index: 10; pointer-events: none;
         }
     </style>
-
-    <script>
-        // ФИКС: Создаем пустой объект THREEx, если библиотека его ждет
-        window.THREEx = window.THREEx || {};
-
-        function logStatus(msg) {
-            document.getElementById('status-bar').innerText = msg;
-            console.log("GAME LOG:", msg);
-        }
-
-        async function startExperience() {
-            const overlay = document.getElementById('overlay');
-            logStatus("Запрашиваю разрешения...");
-
-            try {
-                // 1. Audio
-                const ctx = THREE.AudioContext.getContext();
-                if (ctx.state === 'suspended') ctx.resume();
-
-                // 2. GPS
-                await new Promise((res, rej) => {
-                    navigator.geolocation.getCurrentPosition(res, rej, {enableHighAccuracy: true});
-                });
-
-                // 3. Gyro (для iOS)
-                if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) {
-                    await DeviceOrientationEvent.requestPermission();
-                }
-
-                overlay.style.display = 'none';
-                logStatus("Доступ получен. Жду сигнал GPS...");
-            } catch (e) {
-                logStatus("Ошибка: " + e.message);
-            }
-        }
-
-        AFRAME.registerComponent("ar-game", {
-            init: function() {
-                this.score = 0;
-                this.gameOver = false;
-                this.blocks = [];
-                this.lastSpawnTime = 0;
-                this.gpsReady = false;
-
-                this.camera = document.querySelector("[gps-new-camera]");
-                this.scoreText = document.querySelector("#scoreText");
-
-                // Слушаем обновление координат
-                window.addEventListener('gps-camera-update-position', (e) => {
-                    if (!this.gpsReady) {
-                        this.gpsReady = true;
-                        logStatus("GPS Поймал! Начинаю спавн блоков...");
-                    }
-                });
-
-                // Запасной вариант: если через 5 секунд GPS не ответил, попробуем форсировать
-                setTimeout(() => {
-                    if (!this.gpsReady) logStatus("GPS тупит... Попробуй выйти на открытое место.");
-                }, 5000);
-            },
-
-            tick: function(time, timeDelta) {
-                if (this.gameOver || !this.gpsReady) return;
-
-                if (time - this.lastSpawnTime > 4000) {
-                    this.spawnBlock(time);
-                    this.lastSpawnTime = time;
-                }
-
-                const playerPos = this.camera.object3D.position;
-
-                for (let i = this.blocks.length - 1; i >= 0; i--) {
-                    let b = this.blocks[i];
-                    if (!b.el.object3D) continue;
-
-                    let dist = playerPos.distanceTo(b.el.object3D.position);
-
-                    // Если блок только что появился, dist может быть 0. Игнорируем это.
-                    if (dist > 0.1 && dist < 2.0) {
-                        this.onHit();
-                        return;
-                    }
-
-                    if (time - b.spawnTime > 15000) {
-                        this.onPassed(b.el, i);
-                    }
-                }
-            },
-
-            spawnBlock: function(currentTime) {
-                const cam = this.camera.components["gps-new-camera"];
-                if (!cam || !cam.currentCoords) return;
-
-                // Спавним чуть впереди (случайный разброс)
-                const lat = cam.currentCoords.latitude + (Math.random() - 0.5) * 0.0004;
-                const lon = cam.currentCoords.longitude + (Math.random() - 0.5) * 0.0004;
-
-                const block = document.createElement("a-entity");
-                // Используем обычный куб, чтобы не зависеть от загрузки модели glb
-                block.setAttribute("geometry", "primitive: box; width: 1.5; height: 3; depth: 1.5");
-                block.setAttribute("material", "color: #ff0000; emissive: #300;");
-                block.setAttribute("gps-new-entity-place", `latitude: ${lat}; longitude: ${lon};`);
-                
-                this.el.sceneEl.appendChild(block);
-                this.blocks.push({ el: block, spawnTime: currentTime });
-                logStatus("Блок заспавнен! Всего: " + this.blocks.length);
-            },
-
-            onPassed: function(el, index) {
-                this.score++;
-                this.scoreText.setAttribute("troika-text", "value", `Счет: ${this.score}`);
-                if (el.parentNode) el.parentNode.removeChild(el);
-                this.blocks.splice(index, 1);
-            },
-
-            onHit: function() {
-                this.gameOver = true;
-                logStatus("GAME OVER! Твой счет: " + this.score);
-                document.querySelector("#gameOverPanel").setAttribute("visible", "true");
-                document.querySelector("#gameOverText").setAttribute("troika-text", "value", `ВРЕЗАЛСЯ!\nСчет: ${this.score}`);
-            }
-        });
-    </script>
 </head>
+
 <body>
+    <div id="ui-layer">Статус: Жду нажатия...</div>
 
-    <div id="status-bar">Ожидание нажатия...</div>
-
-    <div id="overlay" onclick="startExperience()">
+    <div id="overlay" onclick="initAR()">
         <div>
-            <h1>AR Dodge</h1>
-            <p>Нажми, чтобы активировать радар</p>
-            <div style="padding: 15px; background: #2196F3; border-radius: 8px;">ИГРАТЬ</div>
+            <h2>AR GPS GAME</h2>
+            <p>Нажми для старта<br>(Требуется HTTPS)</p>
         </div>
     </div>
 
     <a-scene 
         embedded 
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-        renderer="antialias: true; alpha: true;">
-        
+        vr-mode-ui="enabled: false"
+        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+
         <a-camera gps-new-camera="gpsMinDistance: 1" rotation-reader>
             <a-entity id="scoreText" position="0 1 -2" 
-                      troika-text="value: Счет: 0; align: center; fontSize: 0.15; color: #fff;">
-            </a-entity>
-
-            <a-entity id="gameOverPanel" visible="false" position="0 0 -2">
-                <a-plane width="2" height="1" color="#000" opacity="0.9"></a-plane>
-                <a-entity id="gameOverText" position="0 0 0.1" 
-                          troika-text="value:; align: center; fontSize: 0.15; color: #f00;">
-                </a-entity>
+                      troika-text="value: Счёт: 0; align: center; fontSize: 0.15; color: #fff;">
             </a-entity>
         </a-camera>
 
-        <a-entity ar-game></a-entity>
+        <a-entity game-logic></a-entity>
 
     </a-scene>
 
+    <script>
+        const ui = document.getElementById('ui-layer');
+
+        async function initAR() {
+            document.getElementById('overlay').style.display = 'none';
+            ui.innerText = "Статус: Запрос разрешений...";
+
+            // Принудительный запрос геолокации
+            navigator.geolocation.getCurrentPosition(
+                () => {
+                    ui.innerText = "Статус: GPS получен. Ищу спутники...";
+                },
+                (err) => {
+                    ui.innerText = "Ошибка GPS: " + err.message;
+                }
+            );
+
+            // iOS доступ к гироскопу
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                DeviceOrientationEvent.requestPermission();
+            }
+        }
+
+        AFRAME.registerComponent('game-logic', {
+            init: function () {
+                this.score = 0;
+                this.lastSpawn = 0;
+                this.blocks = [];
+                this.camera = document.querySelector('[gps-new-camera]');
+
+                // Слушаем событие GPS от AR.js
+                window.addEventListener('gps-camera-update-position', (e) => {
+                    this.ready = true;
+                    ui.innerText = "Статус: Игра запущена!";
+                });
+            },
+
+            tick: function (time, delta) {
+                if (!this.ready) return;
+
+                // Спавн блока раз в 5 секунд
+                if (time - this.lastSpawn > 5000) {
+                    this.spawnBlock(time);
+                    this.lastSpawn = time;
+                }
+
+                // Проверка столкновений
+                const camPos = this.camera.object3D.position;
+                for (let i = this.blocks.length - 1; i >= 0; i--) {
+                    const b = this.blocks[i];
+                    if (!b.el.object3D) continue;
+
+                    const dist = camPos.distanceTo(b.el.object3D.position);
+
+                    // Если блок близко (от 0.5 до 2 метров)
+                    if (dist > 0.5 && dist < 2) {
+                        ui.innerText = "БАБАХ! Счёт: " + this.score;
+                        this.score = 0;
+                        this.updateScore();
+                    }
+
+                    // Удаление старых блоков (через 15 сек)
+                    if (time - b.time > 15000) {
+                        this.removeBlock(i);
+                        this.score++;
+                        this.updateScore();
+                    }
+                }
+            },
+
+            spawnBlock: function (time) {
+                const coords = this.camera.components['gps-new-camera'].currentCoords;
+                if (!coords) return;
+
+                const lat = coords.latitude + (Math.random() - 0.5) * 0.0005;
+                const lon = coords.longitude + (Math.random() - 0.5) * 0.0005;
+
+                const el = document.createElement('a-entity');
+                el.setAttribute('geometry', 'primitive: box; width: 2; height: 2; depth: 2');
+                el.setAttribute('material', 'color: red; opacity: 0.8');
+                el.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lon}`);
+
+                this.el.sceneEl.appendChild(el);
+                this.blocks.push({ el: el, time: time });
+                console.log("Блок создан на", lat, lon);
+            },
+
+            removeBlock: function (idx) {
+                const b = this.blocks[idx];
+                if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
+                this.blocks.splice(idx, 1);
+            },
+
+            updateScore: function () {
+                document.getElementById('scoreText').setAttribute('troika-text', 'value', 'Счёт: ' + this.score);
+            }
+        });
+    </script>
 </body>
 </html>
