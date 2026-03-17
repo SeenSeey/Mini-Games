@@ -1,176 +1,233 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="utf-8">
-    <title>AR Dodge - Ultimate Fix</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta charset="utf-8">
+<title>AR Dodge - Fake Anchor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-    
-    <!-- Pin AR.js version and ensure THREEx is present (avoids "THREEx is not defined"). -->
-    <script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/three.js/build/ar-threex-location-only.js"></script>
-    <script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/aframe/build/aframe-ar-new-location-only.js"></script>
-    
-    <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
+<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+<script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/three.js/build/ar-threex-location-only.js"></script>
+<script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/aframe/build/aframe-ar-new-location-only.js"></script>
+<script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
 
-    <script>
-        // 1. РЕГИСТРИРУЕМ КОМПОНЕНТ ДО СЦЕНЫ
-        AFRAME.registerComponent('game-logic', {
-            init: function () {
-                this.score = 0;
-                this.lastSpawn = 0;
-                this.blocks = [];
-                this.ready = false;
-                this.camera = document.querySelector('[gps-new-camera]');
-                this.scoreText = document.querySelector("#scoreText");
+<script>
+AFRAME.registerComponent('game-logic', {
+    init: function () {
+        this.score = 0;
+        this.blocks = [];
+        this.lastSpawn = 0;
 
-                // Ждем реального сигнала GPS
-                window.addEventListener('gps-camera-update-position', () => {
-                    if (!this.ready) {
-                        this.ready = true;
-                        document.getElementById('status').innerText = "Игра: Блоки активированы!";
-                    }
-                });
-            },
+        this.camera = document.querySelector('[gps-new-camera]');
+        this.scoreText = document.querySelector("#scoreText");
 
-            tick: function (time, delta) {
-                if (!this.ready) return;
+        // ===== GPS STATE =====
+        this.originSet = false;
+        this.originLat = 0;
+        this.originLon = 0;
 
-                // Спавн раз в 4 сек
-                if (time - this.lastSpawn > 4000) {
-                    this.spawnBlock(time);
-                    this.lastSpawn = time;
-                }
+        this.smoothedLat = null;
+        this.smoothedLon = null;
 
-                // Проверка дистанции
-                const camPos = this.camera.object3D.position;
-                for (let i = this.blocks.length - 1; i >= 0; i--) {
-                    const b = this.blocks[i];
-                    if (!b.el.object3D) continue;
+        this.useGPS = false;
+        this.alpha = 0.1; // сглаживание
 
-                    const dist = camPos.distanceTo(b.el.object3D.position);
+        document.getElementById('status').innerText = "Ожидание GPS...";
 
-                    // Коллизия (от 0.5 до 2 метров)
-                    if (dist > 0.5 && dist < 2.0) {
-                        this.score = 0;
-                        this.updateUI("БА-БАХ!");
-                    }
+        // слушаем GPS
+        window.addEventListener('gps-camera-update-position', (e) => {
+            let coords = e.detail.position;
 
-                    // Удаление через 15 сек (успешный додж)
-                    if (time - b.time > 15000) {
-                        this.removeBlock(i);
-                        this.score++;
-                        this.updateUI("Очки: " + this.score);
-                    }
-                }
-            },
+            if (!coords) return;
 
-            spawnBlock: function (time) {
-                const camComp = this.camera.components['gps-new-camera'];
-                if (!camComp || !camComp.currentCoords) return;
+            let lat = coords.latitude;
+            let lon = coords.longitude;
 
-                const coords = camComp.currentCoords;
-                // Блоки в радиусе ~20-30 метров
-                const lat = coords.latitude + (Math.random() - 0.5) * 0.0004;
-                const lon = coords.longitude + (Math.random() - 0.5) * 0.0004;
+            // ===== SMOOTHING =====
+            if (this.smoothedLat === null) {
+                this.smoothedLat = lat;
+                this.smoothedLon = lon;
+            } else {
+                this.smoothedLat += (lat - this.smoothedLat) * this.alpha;
+                this.smoothedLon += (lon - this.smoothedLon) * this.alpha;
+            }
 
-                const el = document.createElement('a-entity');
-                el.setAttribute('geometry', 'primitive: box; width: 1.5; height: 3; depth: 1.5');
-                el.setAttribute('material', 'color: red; opacity: 0.8; emissive: #ff0000; emissiveIntensity: 0.5');
-                el.setAttribute('gps-new-entity-place', `latitude: ${lat}; longitude: ${lon}`);
+            // ===== SET ORIGIN =====
+            if (!this.originSet) {
+                this.originLat = this.smoothedLat;
+                this.originLon = this.smoothedLon;
+                this.originSet = true;
+                this.useGPS = true;
 
-                this.el.sceneEl.appendChild(el);
-                this.blocks.push({ el: el, time: time });
-            },
-
-            removeBlock: function (idx) {
-                const b = this.blocks[idx];
-                if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
-                this.blocks.splice(idx, 1);
-            },
-
-            updateUI: function (msg) {
-                this.scoreText.setAttribute('troika-text', 'value', msg);
+                document.getElementById('status').innerText = "GPS зафиксирован (anchor установлен)";
             }
         });
 
-        // 2. ФУНКЦИЯ ЗАПУСКА
-        async function startApp() {
-            document.getElementById('overlay').style.display = 'none';
-            var statusEl = document.getElementById('status');
-            statusEl.innerText = 'Запрос геолокации...';
-
-            // Сначала запрашиваем геолокацию (нужно для GPS-компонента AR.js)
-            function onPos() {
-                statusEl.innerText = 'GPS: Ожидание точности. Поверни телефон.';
+        // fallback если GPS плохой
+        setTimeout(() => {
+            if (!this.originSet) {
+                document.getElementById('status').innerText = "Нет GPS → локальный режим";
+                this.useGPS = false;
+                this.originSet = true;
             }
-            function onErr() {
-                statusEl.innerText = 'Включи геолокацию и разреши доступ.';
-            }
-            navigator.geolocation.getCurrentPosition(onPos, onErr, {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 15000
-            });
-            // Периодическое обновление позиции помогает быстрее получить точность
-            navigator.geolocation.watchPosition(onPos, onErr, {
-                enableHighAccuracy: true,
-                maximumAge: 3000,
-                timeout: 10000
-            });
+        }, 8000);
+    },
 
-            // iOS: разрешение на датчики ориентации (обязательно для компас/поворот)
-            if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-                try {
-                    await DeviceOrientationEvent.requestPermission();
-                } catch (e) {
-                    statusEl.innerText = 'Разреши датчики движения для AR.';
-                }
+    tick: function (time, delta) {
+        if (!this.originSet) return;
+
+        if (time - this.lastSpawn > 3000) {
+            this.spawnBlock();
+            this.lastSpawn = time;
+        }
+
+        let dt = delta / 1000;
+        let cam = this.camera.object3D;
+
+        for (let i = this.blocks.length - 1; i >= 0; i--) {
+            let b = this.blocks[i];
+            let obj = b.el.object3D;
+
+            obj.position.add(b.velocity.clone().multiplyScalar(dt));
+
+            let dist = cam.position.distanceTo(obj.position);
+
+            if (dist < 1.2) {
+                this.score = 0;
+                this.updateUI("💥 БА-БАХ!");
+                this.removeBlock(i);
+                continue;
+            }
+
+            if (dist < 0.5 || obj.position.z > cam.position.z + 2) {
+                this.score++;
+                this.updateUI("Очки: " + this.score);
+                this.removeBlock(i);
             }
         }
-    </script>
+    },
 
-    <style>
-        body { margin: 0; overflow: hidden; background: #000; font-family: sans-serif; }
-        #overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.9);
-            display: flex; align-items: center; justify-content: center;
-            z-index: 100; color: white; text-align: center; cursor: pointer;
+    // ===== GPS → LOCAL METERS =====
+    gpsToLocal: function (lat, lon) {
+        const R = 6378137;
+
+        let dLat = (lat - this.originLat) * Math.PI / 180;
+        let dLon = (lon - this.originLon) * Math.PI / 180;
+
+        let x = dLon * R * Math.cos(this.originLat * Math.PI / 180);
+        let z = -dLat * R;
+
+        return { x: x, z: z };
+    },
+
+    spawnBlock: function () {
+        let cam = this.camera.object3D;
+
+        let pos;
+
+        if (this.useGPS) {
+            // ===== GPS BASED SPAWN (НО СТАБИЛЬНЫЙ) =====
+            let randLat = this.smoothedLat + (Math.random() - 0.5) * 0.0001;
+            let randLon = this.smoothedLon + (Math.random() - 0.5) * 0.0001;
+
+            let local = this.gpsToLocal(randLat, randLon);
+
+            pos = new THREE.Vector3(local.x, 1.5, local.z);
+        } else {
+            // ===== LOCAL SPAWN =====
+            let dir = new THREE.Vector3();
+            cam.getWorldDirection(dir);
+
+            let dist = 8 + Math.random() * 4;
+
+            pos = cam.position.clone().add(dir.multiplyScalar(dist));
+            pos.x += (Math.random() - 0.5) * 4;
+            pos.y = 1.5;
         }
-        #status {
-            position: fixed; top: 10px; left: 10px; color: #0f0; 
-            background: rgba(0,0,0,0.5); padding: 5px; font-size: 12px; z-index: 50;
-        }
-    </style>
+
+        let el = document.createElement('a-entity');
+
+        el.setAttribute('geometry', 'primitive: box; width: 1.5; height: 3; depth: 1.5');
+        el.setAttribute('material', 'color: red; opacity: 0.8; emissive: #ff0000');
+
+        this.el.sceneEl.appendChild(el);
+        el.object3D.position.copy(pos);
+
+        let velocity = cam.position.clone().sub(pos).normalize().multiplyScalar(3);
+
+        this.blocks.push({
+            el: el,
+            velocity: velocity
+        });
+    },
+
+    removeBlock: function (i) {
+        let b = this.blocks[i];
+        if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
+        this.blocks.splice(i, 1);
+    },
+
+    updateUI: function (msg) {
+        this.scoreText.setAttribute('troika-text', 'value', msg);
+    }
+});
+
+// ===== START =====
+async function startApp() {
+    document.getElementById('overlay').style.display = 'none';
+
+    navigator.geolocation.watchPosition(()=>{}, ()=>{}, {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+    });
+
+    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+    }
+}
+</script>
+
+<style>
+body { margin:0; overflow:hidden; background:#000; }
+#overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,0.9);
+    display:flex; align-items:center; justify-content:center;
+    color:#fff; z-index:100;
+}
+#status {
+    position:fixed; top:10px; left:10px;
+    color:#0f0; background:rgba(0,0,0,0.5);
+    padding:5px; font-size:12px;
+}
+</style>
 </head>
 
 <body>
-    <div id="status">Статус: Нажми на экран</div>
 
-    <div id="overlay" onclick="startApp()">
-        <div>
-            <h2>GPS Dodge AR</h2>
-            <p>Нажми для старта</p>
-        </div>
+<div id="status">Нажми для старта</div>
+
+<div id="overlay" onclick="startApp()">
+    <div>
+        <h2>AR Dodge (Stable)</h2>
+        <p>Нажми для старта</p>
     </div>
+</div>
 
-    <a-scene 
-        embedded 
-        arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
-        
-        <!-- Фон (в location-only нет камеры — без неба экран чёрный) -->
-        <a-sky color="#1a1a2e"></a-sky>
-        <a-entity light="type: ambient; intensity: 0.6"></a-entity>
-        <a-entity light="type: directional; intensity: 0.8; position: 1 1 1"></a-entity>
-        
-        <a-camera gps-new-camera="gpsMinDistance: 2" rotation-reader>
-            <a-entity id="scoreText" position="0 0.8 -2" 
-                      troika-text="value: Очки: 0; align: center; fontSize: 0.15; color: #fff;">
-            </a-entity>
-        </a-camera>
+<a-scene embedded arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+    <a-sky color="#111"></a-sky>
 
-        <a-entity game-logic></a-entity>
+    <a-entity light="type: ambient; intensity: 0.7"></a-entity>
+    <a-entity light="type: directional; intensity: 0.8" position="1 1 1"></a-entity>
 
-    </a-scene>
+    <a-camera gps-new-camera rotation-reader>
+        <a-entity id="scoreText"
+            position="0 0.8 -2"
+            troika-text="value: Очки: 0; align: center; fontSize: 0.15; color: #fff;">
+        </a-entity>
+    </a-camera>
+
+    <a-entity game-logic></a-entity>
+</a-scene>
+
 </body>
 </html>
