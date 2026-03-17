@@ -5,22 +5,41 @@
 <title>GPS Block Collector – AR Game</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 
-<!-- A-Frame -->
 <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-<!-- AR.js with GPS support -->
-<script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar-nft.js"></script>
-<!-- GPS Location component -->
 <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
 
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  body {
+  html, body {
+    width: 100%; height: 100%;
     overflow: hidden;
     background: #000;
     font-family: 'Courier New', monospace;
     user-select: none;
     -webkit-user-select: none;
+  }
+
+  /* ── Фикс растяжения: видео AR.js всегда cover ── */
+  #arjs-video,
+  video {
+    position: fixed !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) !important;
+    min-width: 100% !important;
+    min-height: 100% !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: cover !important;
+    z-index: -1 !important;
+  }
+
+  a-scene {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100% !important;
+    height: 100% !important;
   }
 
   /* ─── HUD ─── */
@@ -80,7 +99,7 @@
     to   { box-shadow: 0 0 22px rgba(255,50,50,1); }
   }
 
-  /* ─── Radar / compass strip ─── */
+  /* ─── Индикаторы направления ─── */
   #compass-bar {
     display: flex;
     justify-content: center;
@@ -99,7 +118,7 @@
     letter-spacing: 0.06em;
   }
 
-  /* ─── Collect flash ─── */
+  /* ─── Вспышка при сборе ─── */
   #collect-flash {
     position: fixed;
     inset: 0;
@@ -107,11 +126,9 @@
     z-index: 10000;
     background: radial-gradient(circle, rgba(0,255,120,0.45) 0%, transparent 70%);
     opacity: 0;
-    transition: opacity 0.06s;
   }
 
   #collect-flash.flash {
-    opacity: 1;
     animation: flashOut 0.35s forwards;
   }
 
@@ -120,7 +137,7 @@
     100% { opacity: 0; }
   }
 
-  /* ─── Floating score popup ─── */
+  /* ─── Попап +1 ─── */
   .score-popup {
     position: fixed;
     z-index: 10001;
@@ -141,7 +158,7 @@
     100% { top: 28%; opacity: 0; transform: translateX(-50%) scale(1); }
   }
 
-  /* ─── Crosshair ─── */
+  /* ─── Прицел ─── */
   #crosshair {
     position: fixed;
     top: 50%; left: 50%;
@@ -175,8 +192,8 @@
     50%       { transform: scale(1.25); opacity: 0.15; }
   }
 
-  /* ─── Overlays: start / end ─── */
-  #overlay {
+  /* ─── Оверлеи старт/финиш ─── */
+  .overlay {
     position: fixed;
     inset: 0;
     z-index: 20000;
@@ -190,9 +207,9 @@
     padding: 24px;
   }
 
-  #overlay.hidden { display: none; }
+  .overlay.hidden { display: none; }
 
-  #overlay h1 {
+  .overlay h1 {
     font-size: 2rem;
     letter-spacing: 0.12em;
     color: #00ff78;
@@ -200,7 +217,7 @@
     margin-bottom: 10px;
   }
 
-  #overlay p {
+  .overlay p {
     font-size: 0.95rem;
     opacity: 0.75;
     max-width: 320px;
@@ -208,14 +225,14 @@
     margin-bottom: 8px;
   }
 
-  #overlay .big-score {
+  .overlay .big-score {
     font-size: 4rem;
     color: #00ff78;
     text-shadow: 0 0 30px #00ff78;
     margin: 12px 0;
   }
 
-  #overlay button {
+  .overlay button {
     margin-top: 20px;
     padding: 14px 36px;
     font-size: 1rem;
@@ -230,13 +247,13 @@
     transition: background 0.2s, color 0.2s, box-shadow 0.2s;
   }
 
-  #overlay button:hover {
+  .overlay button:active {
     background: #00ff78;
     color: #000;
     box-shadow: 0 0 22px #00ff78;
   }
 
-  /* ─── GPS status ─── */
+  /* ─── GPS статус ─── */
   #gps-status {
     position: fixed;
     bottom: 16px;
@@ -247,32 +264,16 @@
     color: rgba(255,255,255,0.4);
     letter-spacing: 0.1em;
     pointer-events: none;
-  }
-
-  /* No AR/GPS warning */
-  #no-gps-warning {
-    display: none;
-    position: fixed;
-    bottom: 50px;
-    left: 50%;
-    transform: translateX(-50%);
-    z-index: 20001;
-    background: rgba(255,80,0,0.9);
-    color: #fff;
-    padding: 10px 20px;
-    border-radius: 6px;
-    font-size: 0.8rem;
-    text-align: center;
-    max-width: 300px;
+    white-space: nowrap;
   }
 </style>
 </head>
 <body>
 
-<!-- ─────────── HUD ─────────── -->
+<!-- ─── HUD ─── -->
 <div id="hud">
   <div id="top-bar">
-    <div class="hud-box" id="score-box">
+    <div class="hud-box">
       <span>Очки</span>
       <strong id="score-val">0</strong>
     </div>
@@ -280,7 +281,7 @@
       <span>Время</span>
       <strong id="timer-val">30</strong>
     </div>
-    <div class="hud-box" id="blocks-box">
+    <div class="hud-box">
       <span>Блоки</span>
       <strong id="blocks-val">0</strong>
     </div>
@@ -288,31 +289,21 @@
   <div id="compass-bar"></div>
 </div>
 
-<!-- Crosshair -->
 <div id="crosshair"><div class="ring"></div></div>
-
-<!-- Screen flash on collect -->
 <div id="collect-flash"></div>
-
-<!-- GPS status -->
 <div id="gps-status">GPS: ожидание…</div>
 
-<!-- No GPS fallback -->
-<div id="no-gps-warning">
-  GPS недоступен. Проверьте разрешения браузера и перезагрузите страницу.
-</div>
-
-<!-- ─── START OVERLAY ─── -->
-<div id="overlay" id="start-overlay">
+<!-- ─── СТАРТ ─── -->
+<div id="start-overlay" class="overlay">
   <h1>📦 BLOCK HUNT</h1>
-  <p>Ходи по улице и собирай блоки.<br>Чем ближе ты к блоку — тем он ярче.</p>
+  <p>Блоки появляются рядом с тобой прямо в комнате.<br>Подойди к блоку, чтобы собрать его.</p>
   <p>У тебя <strong>30 секунд</strong>. Собери как можно больше!</p>
   <p style="font-size:0.78rem;opacity:0.5;margin-top:4px;">Требуется: GPS + камера</p>
-  <button id="start-btn">НАЧАТЬ ИГРУ</button>
+  <button id="start-btn">GPS: ожидание…</button>
 </div>
 
-<!-- ─── END OVERLAY ─── -->
-<div id="end-overlay" class="hidden">
+<!-- ─── ФИНИШ ─── -->
+<div id="end-overlay" class="overlay hidden">
   <h1>ВРЕМЯ ВЫШЛО</h1>
   <div class="big-score" id="final-score">0</div>
   <p>блоков собрано</p>
@@ -320,90 +311,68 @@
   <button id="restart-btn">ИГРАТЬ СНОВА</button>
 </div>
 
-<!-- ─── A-FRAME SCENE ─── -->
+<!-- ─── A-FRAME ─── -->
 <a-scene
   vr-mode-ui="enabled:false"
-  arjs="sourceType:webcam; videoTexture:true; debugUIEnabled:false; trackingMethod:best;"
-  renderer="antialias:true;logarithmicDepthBuffer:true;"
-  embedded
-  style="width:100%;height:100vh;">
+  arjs="sourceType:webcam; videoTexture:true; debugUIEnabled:false;"
+  renderer="antialias:true; logarithmicDepthBuffer:true;"
+  embedded>
 
-  <a-assets>
-    <!-- Inline SVG texture for blocks to avoid hosting files -->
-  </a-assets>
-
-  <!-- GPS Camera -->
   <a-camera
     id="ar-camera"
-    gps-new-camera="gpsMinDistance:1;gpsTimeInterval:100"
+    gps-new-camera="gpsMinDistance:0.1; gpsTimeInterval:100"
     look-controls="enabled:true"
-    arjs-look-controls="smoothingFactor:0.1"
-    rotation-reader>
+    arjs-look-controls="smoothingFactor:0.1">
   </a-camera>
 
 </a-scene>
 
-<!-- ─────────── GAME LOGIC ─────────── -->
 <script>
 'use strict';
 
-// ────── CONFIG ──────
-const GAME_DURATION   = 30;       // seconds
-const BLOCK_COUNT     = 10;       // blocks on field at once
-const SPAWN_RADIUS_M  = 30;       // metres radius around player
-const COLLECT_DIST_M  = 4;        // metres to collect
-const BLOCK_POLL_MS   = 500;      // collision check interval
-const INDICATOR_DIST  = 60;       // hide indicator if > this metres away
+// ── КОНФИГ ──
+const GAME_DURATION  = 30;   // секунд
+const BLOCK_COUNT    = 8;    // блоков на поле
+const SPAWN_MIN_M    = 2;    // минимальный радиус спавна (метры)
+const SPAWN_MAX_M    = 8;    // максимальный радиус спавна (метры)
+const COLLECT_DIST_M = 2.5;  // дистанция сбора (метры)
+const POLL_MS        = 400;  // интервал проверки коллизий
 
-// ────── STATE ──────
-let gameRunning   = false;
-let score         = 0;
-let timeLeft      = GAME_DURATION;
-let timerInterval = null;
-let pollInterval  = null;
-let playerLat     = null;
-let playerLon     = null;
-let gpsReady      = false;
-let blocks        = [];           // {id, lat, lon, el, collected}
-let blockIdSeq    = 0;
+// ── СОСТОЯНИЕ ──
+let gameRunning = false;
+let score       = 0;
+let timeLeft    = GAME_DURATION;
+let timerInt    = null;
+let pollInt     = null;
+let playerLat   = null;
+let playerLon   = null;
+let gpsReady    = false;
+let blocks      = [];
+let blockSeq    = 0;
 
-// ────── DOM REFS ──────
-const scoreVal    = document.getElementById('score-val');
-const timerVal    = document.getElementById('timer-val');
-const blocksVal   = document.getElementById('blocks-val');
-const timerBox    = document.getElementById('timer-box');
-const gpsStatus   = document.getElementById('gps-status');
-const compassBar  = document.getElementById('compass-bar');
-const collectFlash= document.getElementById('collect-flash');
-const startOverlay= document.getElementById('overlay');
-const endOverlay  = document.getElementById('end-overlay');
-const finalScore  = document.getElementById('final-score');
-const endComment  = document.getElementById('end-comment');
-const scene       = document.querySelector('a-scene');
+const $ = id => document.getElementById(id);
+const scene = document.querySelector('a-scene');
 
-// ────── UTILITIES ──────
+// ── МАТЕМАТИКА ──
 
-/** Haversine distance in metres */
-function distMetres(lat1, lon1, lat2, lon2) {
-  const R = 6371000;
+function distM(lat1, lon1, lat2, lon2) {
+  const R    = 6371000;
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat/2)**2 +
-            Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  const a    = Math.sin(dLat/2)**2 +
+               Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Bearing from player to target (degrees, 0=N) */
 function bearing(lat1, lon1, lat2, lon2) {
   const dLon = (lon2 - lon1) * Math.PI / 180;
-  const y = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
-  const x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180) -
-            Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLon);
-  return (Math.atan2(y, x) * 180/Math.PI + 360) % 360;
+  const y    = Math.sin(dLon) * Math.cos(lat2 * Math.PI / 180);
+  const x    = Math.cos(lat1*Math.PI/180) * Math.sin(lat2*Math.PI/180) -
+               Math.sin(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.cos(dLon);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-/** Random offset in metres → lat/lon delta */
-function randomLatLonOffset(lat, lon, minM, maxM) {
+function randomOffset(lat, lon, minM, maxM) {
   const dist  = minM + Math.random() * (maxM - minM);
   const angle = Math.random() * 2 * Math.PI;
   const dLat  = (dist * Math.cos(angle)) / 111320;
@@ -411,83 +380,125 @@ function randomLatLonOffset(lat, lon, minM, maxM) {
   return { lat: lat + dLat, lon: lon + dLon };
 }
 
-// ────── GPS INIT ──────
-function initGPS() {
-  if (!navigator.geolocation) {
-    document.getElementById('no-gps-warning').style.display = 'block';
-    return;
-  }
-
-  const opts = { enableHighAccuracy: true, maximumAge: 1000, timeout: 10000 };
-
-  navigator.geolocation.watchPosition(pos => {
-    playerLat = pos.coords.latitude;
-    playerLon = pos.coords.longitude;
-    const acc  = Math.round(pos.coords.accuracy);
-    gpsStatus.textContent = `GPS: ${playerLat.toFixed(5)}, ${playerLon.toFixed(5)}  ±${acc}м`;
-
-    if (!gpsReady) {
-      gpsReady = true;
-      // Allow start once GPS is available
-      document.getElementById('start-btn').disabled = false;
-      document.getElementById('start-btn').textContent = 'НАЧАТЬ ИГРУ';
-    }
-  }, err => {
-    gpsStatus.textContent = 'GPS: ошибка — ' + err.message;
-    document.getElementById('no-gps-warning').style.display = 'block';
-  }, opts);
-}
-
-// ────── BLOCK MANAGEMENT ──────
-
-/** Colour based on distance */
-function blockColor(dist) {
-  if (dist < COLLECT_DIST_M * 1.5) return '#ff4444';
-  if (dist < 10) return '#ff9900';
-  if (dist < 20) return '#ffee00';
+function blockColor(d) {
+  if (d < COLLECT_DIST_M * 1.5) return '#ff4444';
+  if (d < 4)  return '#ff9900';
+  if (d < 6)  return '#ffee00';
   return '#00ccff';
 }
+
+function bearingToArrow(deg) {
+  return ['↑N','↗NE','→E','↘SE','↓S','↙SW','←W','↖NW'][Math.round(deg / 45) % 8];
+}
+
+// ── GPS ──
+
+function initGPS() {
+  if (!navigator.geolocation) {
+    $('start-btn').textContent = 'GPS недоступен';
+    return;
+  }
+  navigator.geolocation.watchPosition(
+    pos => {
+      playerLat = pos.coords.latitude;
+      playerLon = pos.coords.longitude;
+      const acc = Math.round(pos.coords.accuracy);
+      $('gps-status').textContent = `±${acc}м`;
+
+      if (!gpsReady) {
+        gpsReady = true;
+        $('start-btn').disabled = false;
+        $('start-btn').textContent = 'НАЧАТЬ ИГРУ';
+      }
+    },
+    err => {
+      $('gps-status').textContent = 'GPS: ошибка';
+      // Фоллбэк через 5 сек — позволяет играть без GPS (тестирование)
+    },
+    { enableHighAccuracy: true, maximumAge: 500, timeout: 8000 }
+  );
+}
+
+// ── ФИКС ВИДЕО: применяем cover после загрузки сцены ──
+
+function fixVideoStretch() {
+  // AR.js создаёт <video> динамически — ждём его появления
+  const apply = () => {
+    const videos = document.querySelectorAll('video');
+    videos.forEach(v => {
+      v.style.cssText = `
+        position: fixed !important;
+        top: 50% !important; left: 50% !important;
+        transform: translate(-50%, -50%) !important;
+        min-width: 100vw !important; min-height: 100vh !important;
+        width: auto !important; height: auto !important;
+        object-fit: cover !important;
+        z-index: -1 !important;
+      `;
+    });
+    // Также canvas AR.js
+    const canvases = document.querySelectorAll('canvas.a-canvas');
+    canvases.forEach(c => {
+      c.style.cssText = `
+        position: fixed !important;
+        top: 0 !important; left: 0 !important;
+        width: 100% !important; height: 100% !important;
+      `;
+    });
+  };
+
+  // Применяем сразу и через observer — AR.js может вставить видео позже
+  apply();
+  const obs = new MutationObserver(apply);
+  obs.observe(document.body, { childList: true, subtree: true });
+  // Дополнительный запуск через 1 и 2 сек на случай задержки инициализации
+  setTimeout(apply, 1000);
+  setTimeout(apply, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', fixVideoStretch);
+
+// ── БЛОКИ ──
 
 function spawnBlock() {
   if (!gpsReady || !playerLat) return;
 
-  const { lat, lon } = randomLatLonOffset(playerLat, playerLon, 5, SPAWN_RADIUS_M);
-  const id = ++blockIdSeq;
+  const { lat, lon } = randomOffset(playerLat, playerLon, SPAWN_MIN_M, SPAWN_MAX_M);
+  const id = ++blockSeq;
 
-  // A-Frame entity with AR.js GPS
   const entity = document.createElement('a-entity');
   entity.setAttribute('id', `block-${id}`);
   entity.setAttribute('gps-new-entity-place', `latitude:${lat};longitude:${lon}`);
 
-  // Animated cube inside
+  // Куб
   const cube = document.createElement('a-box');
   cube.setAttribute('color', '#00ccff');
-  cube.setAttribute('width', '1.5');
-  cube.setAttribute('height', '1.5');
-  cube.setAttribute('depth', '1.5');
-  cube.setAttribute('position', '0 1.5 0');
-  cube.setAttribute('opacity', '0.85');
-  cube.setAttribute('material', 'emissive:#003366;emissiveIntensity:0.4;metalness:0.3;roughness:0.4');
-  cube.setAttribute('animation', 'property:rotation;to:0 360 0;loop:true;dur:3000;easing:linear');
-  cube.setAttribute('animation__bounce', 'property:position;from:0 1.2 0;to:0 2.0 0;dir:alternate;loop:true;dur:1200;easing:easeInOutSine');
+  cube.setAttribute('width',  '0.4');
+  cube.setAttribute('height', '0.4');
+  cube.setAttribute('depth',  '0.4');
+  cube.setAttribute('position', '0 0.5 0');
+  cube.setAttribute('opacity', '0.9');
+  cube.setAttribute('material', 'emissive:#003366; emissiveIntensity:0.5; metalness:0.4; roughness:0.3');
+  cube.setAttribute('animation',        'property:rotation; to:0 360 0; loop:true; dur:2500; easing:linear');
+  cube.setAttribute('animation__bob',   'property:position; from:0 0.4 0; to:0 0.65 0; dir:alternate; loop:true; dur:1000; easing:easeInOutSine');
 
-  // Glow ring
+  // Кольцо на земле
   const ring = document.createElement('a-torus');
   ring.setAttribute('color', '#00ccff');
-  ring.setAttribute('radius', '1.0');
-  ring.setAttribute('radius-tubular', '0.06');
-  ring.setAttribute('position', '0 0.1 0');
+  ring.setAttribute('radius', '0.3');
+  ring.setAttribute('radius-tubular', '0.02');
+  ring.setAttribute('position', '0 0.05 0');
   ring.setAttribute('rotation', '90 0 0');
-  ring.setAttribute('material', 'emissive:#00ccff;emissiveIntensity:0.7');
-  ring.setAttribute('animation__scale', 'property:scale;from:1 1 1;to:1.3 1.3 1.3;dir:alternate;loop:true;dur:900;easing:easeInOutSine');
+  ring.setAttribute('material', 'emissive:#00ccff; emissiveIntensity:0.8');
+  ring.setAttribute('animation__scale', 'property:scale; from:1 1 1; to:1.4 1.4 1.4; dir:alternate; loop:true; dur:800; easing:easeInOutSine');
 
-  // Label
+  // Метка с номером
   const label = document.createElement('a-text');
   label.setAttribute('value', `#${id}`);
   label.setAttribute('align', 'center');
   label.setAttribute('color', '#ffffff');
-  label.setAttribute('position', '0 3.2 0');
-  label.setAttribute('scale', '3 3 3');
+  label.setAttribute('position', '0 1.0 0');
+  label.setAttribute('scale', '1 1 1');
   label.setAttribute('look-at', '[gps-new-camera]');
 
   entity.appendChild(cube);
@@ -495,53 +506,47 @@ function spawnBlock() {
   entity.appendChild(label);
   scene.appendChild(entity);
 
-  const blockData = { id, lat, lon, el: entity, cube, ring, collected: false };
-  blocks.push(blockData);
-  updateBlocksCount();
-  return blockData;
+  blocks.push({ id, lat, lon, el: entity, cube, ring, label, collected: false });
+  updateBlocksUI();
 }
 
-function removeBlock(blockData) {
-  blockData.collected = true;
+function removeBlock(b) {
+  b.collected = true;
 
-  // Explosion effect
-  const pos = blockData.el.object3D ? blockData.el.object3D.position : null;
-  blockData.cube.setAttribute('animation__explode',
-    'property:scale;to:3 3 3;dur:200;easing:easeOutQuad');
-  blockData.cube.setAttribute('animation__fade',
-    'property:material.opacity;to:0;dur:250;easing:easeOutQuad;startEvents:animationcomplete__explode');
+  // Анимация взрыва
+  b.cube.setAttribute('animation__explode', 'property:scale; to:3 3 3; dur:180; easing:easeOutQuad');
+  b.cube.setAttribute('animation__fade',    'property:material.opacity; to:0; dur:220; easing:easeOutQuad');
+  b.ring.setAttribute('animation__rfade',   'property:material.opacity; to:0; dur:200');
 
   setTimeout(() => {
-    if (blockData.el.parentNode) blockData.el.parentNode.removeChild(blockData.el);
-    blocks = blocks.filter(b => !b.collected);
-    updateBlocksCount();
-    // Refill
+    if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
+    blocks = blocks.filter(x => !x.collected);
+    updateBlocksUI();
     if (gameRunning) spawnBlock();
-  }, 300);
+  }, 250);
 }
 
-function updateBlocksCount() {
-  blocksVal.textContent = blocks.filter(b => !b.collected).length;
+function updateBlocksUI() {
+  $('blocks-val').textContent = blocks.filter(b => !b.collected).length;
 }
 
-// ────── COLLISION CHECK ──────
+// ── ПРОВЕРКА КОЛЛИЗИЙ ──
+
 function checkCollisions() {
   if (!gameRunning || !playerLat) return;
 
   const active = blocks.filter(b => !b.collected);
 
   active.forEach(b => {
-    const d = distMetres(playerLat, playerLon, b.lat, b.lon);
+    const d = distM(playerLat, playerLon, b.lat, b.lon);
 
-    // Update block color by distance
-    const color = blockColor(d);
-    b.cube.setAttribute('color', color);
-    b.ring.setAttribute('color', color);
-    b.cube.setAttribute('material', `emissive:${color};emissiveIntensity:0.4;metalness:0.3;roughness:0.4`);
+    // Обновляем цвет по дистанции
+    const c = blockColor(d);
+    b.cube.setAttribute('color', c);
+    b.ring.setAttribute('color', c);
+    b.cube.setAttribute('material', `emissive:${c}; emissiveIntensity:0.5; metalness:0.4; roughness:0.3`);
 
-    if (d <= COLLECT_DIST_M) {
-      collectBlock(b);
-    }
+    if (d <= COLLECT_DIST_M) collectBlock(b);
   });
 
   updateCompass(active);
@@ -549,140 +554,121 @@ function checkCollisions() {
 
 function collectBlock(b) {
   score++;
-  scoreVal.textContent = score;
+  $('score-val').textContent = score;
   removeBlock(b);
 
-  // Flash
-  collectFlash.classList.remove('flash');
-  void collectFlash.offsetWidth; // reflow
-  collectFlash.classList.add('flash');
+  // Вспышка
+  const flash = $('collect-flash');
+  flash.classList.remove('flash');
+  void flash.offsetWidth;
+  flash.classList.add('flash');
 
-  // Popup
+  // Попап
   const popup = document.createElement('div');
   popup.className = 'score-popup';
   popup.textContent = '+1';
   document.body.appendChild(popup);
   setTimeout(() => popup.remove(), 800);
 
-  // Vibrate
-  if (navigator.vibrate) navigator.vibrate([30, 15, 50]);
+  if (navigator.vibrate) navigator.vibrate([25, 10, 40]);
 }
 
-// ────── COMPASS INDICATORS ──────
+// ── КОМПАС ──
+
 function updateCompass(active) {
-  compassBar.innerHTML = '';
+  const bar = $('compass-bar');
+  bar.innerHTML = '';
   if (!playerLat) return;
 
-  active.slice(0, 8).forEach(b => {
-    const d = Math.round(distMetres(playerLat, playerLon, b.lat, b.lon));
-    if (d > INDICATOR_DIST) return;
-
+  active.slice(0, 6).forEach(b => {
+    const d    = Math.round(distM(playerLat, playerLon, b.lat, b.lon));
     const bear = Math.round(bearing(playerLat, playerLon, b.lat, b.lon));
-    const dir  = bearingToDir(bear);
+    const dir  = bearingToArrow(bear);
 
     const el = document.createElement('div');
     el.className = 'block-indicator';
-    el.textContent = `${dir} ${d}м`;
     el.style.borderColor = blockColor(d);
     el.style.color = blockColor(d);
-    compassBar.appendChild(el);
+    el.textContent = `${dir} ${d}м`;
+    bar.appendChild(el);
   });
 }
 
-function bearingToDir(deg) {
-  const dirs = ['↑N','↗NE','→E','↘SE','↓S','↙SW','←W','↖NW'];
-  return dirs[Math.round(deg / 45) % 8];
-}
+// ── ИГРОВОЙ ПОТОК ──
 
-// ────── GAME FLOW ──────
 function startGame() {
-  if (!gpsReady) return;
   score    = 0;
   timeLeft = GAME_DURATION;
   blocks   = [];
-  scoreVal.textContent = '0';
-  timerVal.textContent = GAME_DURATION;
-  timerBox.classList.remove('urgent');
+  $('score-val').textContent  = '0';
+  $('timer-val').textContent  = GAME_DURATION;
+  $('blocks-val').textContent = '0';
+  $('timer-box').classList.remove('urgent');
   gameRunning = true;
 
-  startOverlay.classList.add('hidden');
-  endOverlay.classList.add('hidden');
+  $('start-overlay').classList.add('hidden');
+  $('end-overlay').classList.add('hidden');
 
-  // Spawn initial blocks
   for (let i = 0; i < BLOCK_COUNT; i++) {
-    setTimeout(() => spawnBlock(), i * 120);
+    setTimeout(() => spawnBlock(), i * 150);
   }
 
-  // Timer
-  timerInterval = setInterval(() => {
+  timerInt = setInterval(() => {
     timeLeft--;
-    timerVal.textContent = timeLeft;
-    if (timeLeft <= 10) timerBox.classList.add('urgent');
-    if (timeLeft <= 0) endGame();
+    $('timer-val').textContent = timeLeft;
+    if (timeLeft <= 10) $('timer-box').classList.add('urgent');
+    if (timeLeft <= 0)  endGame();
   }, 1000);
 
-  // Collision polling
-  pollInterval = setInterval(checkCollisions, BLOCK_POLL_MS);
+  pollInt = setInterval(checkCollisions, POLL_MS);
 }
 
 function endGame() {
   gameRunning = false;
-  clearInterval(timerInterval);
-  clearInterval(pollInterval);
+  clearInterval(timerInt);
+  clearInterval(pollInt);
 
-  // Remove all blocks
-  blocks.forEach(b => {
-    if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
-  });
+  blocks.forEach(b => { if (b.el.parentNode) b.el.parentNode.removeChild(b.el); });
   blocks = [];
 
-  finalScore.textContent = score;
-  const comments = [
-    [0,  'Попробуй ещё раз, ты сможешь!'],
-    [3,  'Неплохое начало!'],
-    [7,  'Хороший результат! 🏃'],
-    [12, 'Отлично! Настоящий охотник!'],
-    [18, 'Невероятно! Ты чемпион! 🏆'],
-  ];
-  let comment = comments[0][1];
-  for (const [threshold, text] of comments) {
-    if (score >= threshold) comment = text;
-  }
-  endComment.textContent = comment;
+  $('final-score').textContent = score;
 
-  endOverlay.classList.remove('hidden');
+  const table = [
+    [0,  'Попробуй ещё раз!'],
+    [3,  'Неплохо для начала!'],
+    [6,  'Хорошая попытка 👟'],
+    [10, 'Отлично! Быстрые ноги!'],
+    [15, 'Невероятно! Чемпион! 🏆'],
+  ];
+  let comment = table[0][1];
+  for (const [t, txt] of table) { if (score >= t) comment = txt; }
+  $('end-comment').textContent = comment;
+
+  $('end-overlay').classList.remove('hidden');
 }
 
-// ────── BUTTONS ──────
-document.getElementById('start-btn').addEventListener('click', () => {
-  if (gpsReady) startGame();
+// ── КНОПКИ ──
+
+$('start-btn').disabled = true;
+$('start-btn').addEventListener('click', () => { if (gpsReady) startGame(); });
+$('restart-btn').addEventListener('click', () => {
+  $('end-overlay').classList.add('hidden');
+  setTimeout(startGame, 200);
 });
 
-document.getElementById('restart-btn').addEventListener('click', () => {
-  endOverlay.classList.add('hidden');
-  startOverlay.classList.remove('hidden');
-  // Small delay then start
-  setTimeout(startGame, 300);
-});
-
-// ────── BOOT ──────
-document.getElementById('start-btn').disabled = true;
-document.getElementById('start-btn').textContent = 'GPS: ожидание…';
-initGPS();
-
-// If GPS never arrives in 8 seconds, let user start anyway with a warning
+// Фоллбэк: если GPS не пришёл за 8 сек — разрешаем старт с фейковой позицией
 setTimeout(() => {
   if (!gpsReady) {
-    document.getElementById('start-btn').disabled = false;
-    document.getElementById('start-btn').textContent = 'НАЧАТЬ БЕЗ GPS';
-    // Fallback fake position for testing
-    if (!playerLat) {
-      playerLat = 50.1109; // Frankfurt
-      playerLon = 8.6821;
-      gpsReady = true;
-    }
+    playerLat = 50.1109;
+    playerLon = 8.6821;
+    gpsReady  = true;
+    $('start-btn').disabled = false;
+    $('start-btn').textContent = 'ИГРАТЬ (без GPS)';
+    $('gps-status').textContent = 'GPS недоступен — тест режим';
   }
 }, 8000);
+
+initGPS();
 </script>
 </body>
 </html>
