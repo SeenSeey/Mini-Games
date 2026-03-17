@@ -3,7 +3,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <title>AR Mini Game – Уклоняйся от блоков</title>
+  <title>AR Mini Game – Собери блоки</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
 
@@ -28,10 +28,10 @@
     .overlay button:disabled { background: #666; cursor: not-allowed; }
     .overlay .status { margin-top: 12px; font-size: 0.9rem; opacity: 0.8; }
     .overlay.hidden { display: none; }
-    #score-panel {
-      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
-      z-index: 100; color: #fff; font-size: 1.2rem; text-shadow: 0 1px 2px #000;
-      pointer-events: none;
+    #hud {
+      position: fixed; top: 16px; left: 0; right: 0; z-index: 100;
+      display: flex; justify-content: space-between; padding: 0 20px; box-sizing: border-box;
+      color: #fff; font-size: 1.2rem; text-shadow: 0 1px 2px #000; pointer-events: none;
     }
     #game-over-panel {
       position: fixed; inset: 0; background: rgba(0,0,0,0.75);
@@ -51,20 +51,23 @@
 
   <!-- Экран запроса разрешений -->
   <div id="permission-overlay" class="overlay">
-    <h2>AR: Уклоняйся от блоков</h2>
-    <p>Игра использует камеру и GPS. Разрешите доступ к геолокации и камере, затем нажмите «Начать».</p>
+    <h2>AR: Собери блоки</h2>
+    <p>За 30 секунд собери как можно больше блоков: подходи к ним в реальном мире. Нужны камера и GPS.</p>
     <button id="btn-start" disabled>Начать</button>
     <div class="status" id="permission-status">Запрос разрешений…</div>
   </div>
 
-  <!-- Счёт в игре -->
-  <div id="score-panel">Очки: 0</div>
+  <!-- HUD: счёт и таймер -->
+  <div id="hud">
+    <span id="score-panel">Очки: 0</span>
+    <span id="timer-panel">0:30</span>
+  </div>
 
   <!-- Game Over -->
   <div id="game-over-panel">
-    <h2>Игра окончена</h2>
-    <p id="game-over-text">Счёт: 0</p>
-    <button id="btn-restart">Заново</button>
+    <h2>Время вышло!</h2>
+    <p id="game-over-text">Собрано блоков: 0</p>
+    <button id="btn-restart">Играть снова</button>
   </div>
 
   <a-scene
@@ -86,8 +89,8 @@
       gps-position-smoother="factor: 0.14"
     ></a-camera>
 
-    <!-- Спавнер блоков и логика игры (мировые координаты относительно anchor) -->
-    <a-entity id="ar-block-spawner" ar-block-spawner></a-entity>
+    <!-- Блоки привязаны к координатам, сбор при приближении, таймер 30 с -->
+    <a-entity id="ar-collect-game" ar-collect-game></a-entity>
   </a-scene>
 
   <script>
@@ -177,108 +180,85 @@
       }
     });
 
-    // ——— Компонент: спавн блоков в мировых координатах (Fake world anchor), коллизия с камерой ———
-    AFRAME.registerComponent('ar-block-spawner', {
+    // ——— Игра: блоки привязаны к координатам, игрок ходит и собирает, 30 сек ———
+    AFRAME.registerComponent('ar-collect-game', {
       schema: {
-        interval: { default: 2000 },
-        laneOffset: { default: 2.5 },
-        lanes: { default: 3 },
-        startZ: { default: -25 },
-        endZ: { default: 8 },
-        blockSpeed: { default: 12 },
-        hitRadius: { default: 1.4 }
+        gameDurationMs: { default: 30000 },
+        collectRadius: { default: 2.5 },
+        numBlocks: { default: 28 },
+        spawnRadius: { default: 14 },
+        spawnDelayMs: { default: 2000 }
       },
       init: function () {
-        this.lastSpawn = -3000;
-        this.score = 0;
-        this.gameOver = false;
-        this.speedMultiplier = 1;
         this.sceneEl = this.el.sceneEl;
         this.camera = document.querySelector('#ar-camera');
-        this.poolSize = 12;
+        this.score = 0;
+        this.gameOver = false;
+        this.blocksSpawned = false;
+        this.gameStartTime = null;
+        this.firstTickTime = null;
         this.blocks = [];
-        this.spawnDelay = 2500;  // не спавнить блоки и не проверять коллизию первые 2.5 с
-        for (let i = 0; i < this.poolSize; i++) {
-          const box = document.createElement('a-entity');
-          box.setAttribute('geometry', 'primitive: box; width: 1.2; height: 1.2; depth: 1.2');
-          box.setAttribute('material', 'color: #8B4513; metalness: 0.3; roughness: 0.7');
+        var self = this;
+        var colors = ['#FFD700', '#00FF7F', '#00BFFF', '#FF6347', '#9370DB', '#FF69B4'];
+        for (var i = 0; i < this.data.numBlocks; i++) {
+          var box = document.createElement('a-entity');
+          box.setAttribute('geometry', 'primitive: box; width: 1.5; height: 1.5; depth: 1.5');
+          box.setAttribute('material', 'color: ' + colors[i % colors.length] + '; metalness: 0.2; roughness: 0.8');
           box.setAttribute('visible', 'false');
-          box.setAttribute('position', '0 0 -999');  // далеко от камеры, иначе мгновенная коллизия при (0,0,0)
+          box.setAttribute('position', '0 -100 0');
           this.sceneEl.appendChild(box);
-          this.blocks.push({ el: box, active: false });
+          this.blocks.push({ el: box, collected: false });
         }
-        const scorePanel = document.getElementById('score-panel');
-        const gameOverPanel = document.getElementById('game-over-panel');
-        const gameOverText = document.getElementById('game-over-text');
-        const btnRestart = document.getElementById('btn-restart');
-        this.updateScoreUI = function () {
-          scorePanel.textContent = 'Очки: ' + this.score;
-        };
-        this.showGameOver = function () {
-          gameOverText.textContent = 'Счёт: ' + this.score;
-          gameOverPanel.classList.add('visible');
-        };
-        btnRestart.addEventListener('click', function () { location.reload(); });
+        this.scoreEl = document.getElementById('score-panel');
+        this.timerEl = document.getElementById('timer-panel');
+        this.gameOverPanel = document.getElementById('game-over-panel');
+        this.gameOverText = document.getElementById('game-over-text');
+        document.getElementById('btn-restart').addEventListener('click', function () { location.reload(); });
       },
-      tick: function (time, dt) {
+      spawnBlocksAroundOrigin: function () {
+        var r = this.data.spawnRadius;
+        var y = 1.2;
+        for (var i = 0; i < this.blocks.length; i++) {
+          var b = this.blocks[i];
+          var x = (Math.random() * 2 - 1) * r;
+          var z = (Math.random() * 2 - 1) * r;
+          b.el.setAttribute('position', x + ' ' + y + ' ' + z);
+          b.el.setAttribute('visible', 'true');
+          b.collected = false;
+        }
+        this.blocksSpawned = true;
+        this.gameStartTime = this.sceneEl.time;
+      },
+      tick: function (time) {
         if (this.gameOver) return;
-        if (time < this.spawnDelay) return;  // даём время сориентироваться
-        const delta = dt / 1000;
-        const moveZ = this.data.blockSpeed * this.speedMultiplier * delta;
-
-        for (let i = 0; i < this.blocks.length; i++) {
-          const b = this.blocks[i];
-          if (!b.active) continue;
-          const pos = b.el.object3D.position;
-          pos.z += moveZ;
-          if (pos.z > this.data.endZ) {
-            b.active = false;
-            b.el.setAttribute('visible', false);
+        if (this.firstTickTime == null) this.firstTickTime = time;
+        if (!this.blocksSpawned && (time - this.firstTickTime > this.data.spawnDelayMs)) {
+          this.spawnBlocksAroundOrigin();
+        }
+        if (!this.blocksSpawned) return;
+        var elapsed = time - this.gameStartTime;
+        var remaining = Math.max(0, (this.data.gameDurationMs / 1000) - (elapsed / 1000));
+        var sec = Math.ceil(remaining);
+        this.timerEl.textContent = '0:' + (sec < 10 ? '0' : '') + sec;
+        if (remaining <= 0) {
+          this.gameOver = true;
+          this.gameOverText.textContent = 'Собрано блоков: ' + this.score;
+          this.gameOverPanel.classList.add('visible');
+          return;
+        }
+        if (!this.camera) return;
+        var camPos = this.camera.object3D.position;
+        var r2 = this.data.collectRadius * this.data.collectRadius;
+        for (var i = 0; i < this.blocks.length; i++) {
+          var b = this.blocks[i];
+          if (b.collected) continue;
+          var p = b.el.object3D.position;
+          var dx = p.x - camPos.x, dy = p.y - camPos.y, dz = p.z - camPos.z;
+          if (dx * dx + dy * dy + dz * dz < r2) {
+            b.collected = true;
+            b.el.setAttribute('visible', 'false');
             this.score++;
-            if (this.score % 5 === 0) this.speedMultiplier += 0.12;
-            this.updateScoreUI();
-          }
-        }
-
-        this.checkCollisions();
-        if (time - this.lastSpawn > this.data.interval) {
-          this.spawnBlock();
-          this.lastSpawn = time;
-        }
-      },
-      checkCollisions: function () {
-        if (this.gameOver || !this.camera) return;
-        const camPos = this.camera.object3D.position;
-        const r = this.data.hitRadius;
-        for (let i = 0; i < this.blocks.length; i++) {
-          const b = this.blocks[i];
-          if (!b.active) continue;
-          const p = b.el.object3D.position;
-          const dx = p.x - camPos.x, dy = p.y - camPos.y, dz = p.z - camPos.z;
-          if (dx * dx + dy * dy + dz * dz < r * r) {
-            this.gameOver = true;
-            this.showGameOver();
-            return;
-          }
-        }
-      },
-      spawnBlock: function () {
-        const laneIndex = Math.floor(Math.random() * this.data.lanes);
-        const x = (laneIndex - Math.floor(this.data.lanes / 2)) * this.data.laneOffset;
-        let b = this.blocks.find(function (item) { return !item.active; });
-        if (!b) return;
-        b.el.object3D.position.set(x, 1.2, this.data.startZ);
-        b.el.setAttribute('visible', true);
-        b.active = true;
-        if (Math.random() < 0.3) {
-          const otherLane = (Math.floor(Math.random() * this.data.lanes) - Math.floor(this.data.lanes / 2)) * this.data.laneOffset;
-          if (otherLane !== x) {
-            b = this.blocks.find(function (item) { return !item.active; });
-            if (b) {
-              b.el.object3D.position.set(otherLane, 1.2, this.data.startZ);
-              b.el.setAttribute('visible', true);
-              b.active = true;
-            }
+            this.scoreEl.textContent = 'Очки: ' + this.score;
           }
         }
       }
