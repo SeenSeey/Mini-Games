@@ -1,267 +1,283 @@
 <!DOCTYPE html>
-<html>
+<!-- AR-игра: GPS + камера. Для геолокации нужен HTTPS (или localhost). -->
+<html lang="ru">
 <head>
-<meta charset="utf-8">
-<title>AR Dodge - Fake Anchor</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8">
+  <title>AR Mini Game – Уклоняйся от блоков</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
 
-<script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
-<script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/three.js/build/ar-threex-location-only.js"></script>
-<script src="https://unpkg.com/@ar-js-org/ar.js@3.4.5/aframe/build/aframe-ar-new-location-only.js"></script>
-<script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
+  <!-- A-Frame 1.5.0 — совместима с AR.js 3.4.x -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <!-- AR.js Location Based (projected = первая позиция как мировой origin) -->
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js@3.4.8/aframe/build/aframe-ar.js"></script>
 
-<script>
-AFRAME.registerComponent('game-logic', {
-    // init: function () {
-    //     this.score = 0;
-    //     this.blocks = [];
-    //     this.lastSpawn = 0;
-
-    //     this.camera = document.querySelector('[gps-new-camera]');
-    //     this.scoreText = document.querySelector("#scoreText");
-
-    //     // ===== GPS STATE =====
-    //     this.originSet = false;
-    //     this.originLat = 0;
-    //     this.originLon = 0;
-
-    //     this.smoothedLat = null;
-    //     this.smoothedLon = null;
-
-    //     this.useGPS = false;
-    //     this.alpha = 0.1; // сглаживание
-
-    //     document.getElementById('status').innerText = "Ожидание GPS...";
-
-    //     // слушаем GPS
-    //     window.addEventListener('gps-camera-update-position', (e) => {
-    //         let coords = e.detail.position;
-
-    //         if (!coords) return;
-
-    //         let lat = coords.latitude;
-    //         let lon = coords.longitude;
-
-    //         // ===== SMOOTHING =====
-    //         if (this.smoothedLat === null) {
-    //             this.smoothedLat = lat;
-    //             this.smoothedLon = lon;
-    //         } else {
-    //             this.smoothedLat += (lat - this.smoothedLat) * this.alpha;
-    //             this.smoothedLon += (lon - this.smoothedLon) * this.alpha;
-    //         }
-
-    //         // ===== SET ORIGIN =====
-    //         if (!this.originSet) {
-    //             this.originLat = this.smoothedLat;
-    //             this.originLon = this.smoothedLon;
-    //             this.originSet = true;
-    //             this.useGPS = true;
-
-    //             document.getElementById('status').innerText = "GPS зафиксирован (anchor установлен)";
-    //         }
-    //     });
-
-    //     // fallback если GPS плохой
-    //     setTimeout(() => {
-    //         if (!this.originSet) {
-    //             document.getElementById('status').innerText = "Нет GPS → локальный режим";
-    //             this.useGPS = false;
-    //             this.originSet = true;
-    //         }
-    //     }, 8000);
-    // },
-
-    init: function () {
-        this.score = 0;
-        this.blocks = [];
-        this.lastSpawn = 0;
-
-        this.camera = document.querySelector('[gps-new-camera]');
-        this.scoreText = document.querySelector("#scoreText");
-
-        this.scene = this.el.sceneEl;
-        this.sceneReady = false;
-
-        this.originSet = false;
-        this.useGPS = false;
-
-        // ЖДЁМ СЦЕНУ
-        if (this.scene.hasLoaded) {
-            this.onSceneLoaded();
-        } else {
-            this.scene.addEventListener('loaded', () => this.onSceneLoaded());
-        }
-    },
-
-    onSceneLoaded: function () {
-        this.sceneReady = true;
-        console.log("✅ Scene ready");
-
-        document.getElementById('status').innerText = "Сцена готова";
-    },
-
-    tick: function (time, delta) {
-        if (!this.originSet) return;
-
-        if (time - this.lastSpawn > 3000) {
-            this.spawnBlock();
-            this.lastSpawn = time;
-        }
-
-        let dt = delta / 1000;
-        let cam = this.camera.object3D;
-
-        for (let i = this.blocks.length - 1; i >= 0; i--) {
-            let b = this.blocks[i];
-            let obj = b.el.object3D;
-
-            obj.position.add(b.velocity.clone().multiplyScalar(dt));
-
-            let dist = cam.position.distanceTo(obj.position);
-
-            if (dist < 1.2) {
-                this.score = 0;
-                this.updateUI("💥 БА-БАХ!");
-                this.removeBlock(i);
-                continue;
-            }
-
-            if (dist < 0.5 || obj.position.z > cam.position.z + 2) {
-                this.score++;
-                this.updateUI("Очки: " + this.score);
-                this.removeBlock(i);
-            }
-        }
-    },
-
-    // ===== GPS → LOCAL METERS =====
-    gpsToLocal: function (lat, lon) {
-        const R = 6378137;
-
-        let dLat = (lat - this.originLat) * Math.PI / 180;
-        let dLon = (lon - this.originLon) * Math.PI / 180;
-
-        let x = dLon * R * Math.cos(this.originLat * Math.PI / 180);
-        let z = -dLat * R;
-
-        return { x: x, z: z };
-    },
-
-    spawnBlock: function () {
-        let cam = this.camera.object3D;
-
-        let pos;
-
-        if (this.useGPS) {
-            // ===== GPS BASED SPAWN (НО СТАБИЛЬНЫЙ) =====
-            let randLat = this.smoothedLat + (Math.random() - 0.5) * 0.0001;
-            let randLon = this.smoothedLon + (Math.random() - 0.5) * 0.0001;
-
-            let local = this.gpsToLocal(randLat, randLon);
-
-            pos = new THREE.Vector3(local.x, 1.5, local.z);
-        } else {
-            // ===== LOCAL SPAWN =====
-            let dir = new THREE.Vector3();
-            cam.getWorldDirection(dir);
-
-            let dist = 8 + Math.random() * 4;
-
-            pos = cam.position.clone().add(dir.multiplyScalar(dist));
-            pos.x += (Math.random() - 0.5) * 4;
-            pos.y = 1.5;
-        }
-
-        if (!this.sceneReady) return; 
-
-        let el = document.createElement('a-entity');
-
-        el.setAttribute('geometry', 'primitive: box; width: 1.5; height: 3; depth: 1.5');
-        el.setAttribute('material', 'color: red; opacity: 0.8; emissive: #ff0000');
-
-        this.scene.appendChild(el);
-
-        el.object3D.position.copy(pos);
-
-        let velocity = cam.position.clone().sub(pos).normalize().multiplyScalar(3);
-
-        this.blocks.push({
-            el: el,
-            velocity: velocity
-        });
-    },
-
-    removeBlock: function (i) {
-        let b = this.blocks[i];
-        if (b.el.parentNode) b.el.parentNode.removeChild(b.el);
-        this.blocks.splice(i, 1);
-    },
-
-    updateUI: function (msg) {
-        this.scoreText.setAttribute('troika-text', 'value', msg);
+  <style>
+    body { margin: 0; overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.9);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; padding: 20px; text-align: center; color: #fff;
     }
-});
-
-// ===== START =====
-async function startApp() {
-    document.getElementById('overlay').style.display = 'none';
-
-    navigator.geolocation.watchPosition(()=>{}, ()=>{}, {
-        enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 10000
-    });
-
-    if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
-        try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+    .overlay h2 { margin: 0 0 16px; font-size: 1.4rem; }
+    .overlay p { margin: 0 0 24px; opacity: 0.9; max-width: 320px; }
+    .overlay button {
+      padding: 14px 28px; font-size: 1rem; border: none; border-radius: 8px;
+      background: #4CAF50; color: #fff; cursor: pointer;
     }
-}
-</script>
-
-<style>
-body { margin:0; overflow:hidden; background:#000; }
-#overlay {
-    position:fixed; inset:0; background:rgba(0,0,0,0.9);
-    display:flex; align-items:center; justify-content:center;
-    color:#fff; z-index:100;
-}
-#status {
-    position:fixed; top:10px; left:10px;
-    color:#0f0; background:rgba(0,0,0,0.5);
-    padding:5px; font-size:12px;
-}
-</style>
+    .overlay button:disabled { background: #666; cursor: not-allowed; }
+    .overlay .status { margin-top: 12px; font-size: 0.9rem; opacity: 0.8; }
+    .overlay.hidden { display: none; }
+    #score-panel {
+      position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+      z-index: 100; color: #fff; font-size: 1.2rem; text-shadow: 0 1px 2px #000;
+      pointer-events: none;
+    }
+    #game-over-panel {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 1000; color: #fff; text-align: center; padding: 20px;
+    }
+    #game-over-panel.visible { display: flex; }
+    #game-over-panel h2 { margin: 0 0 12px; }
+    #game-over-panel p { margin: 0 0 20px; opacity: 0.9; }
+    #game-over-panel button {
+      padding: 12px 24px; font-size: 1rem; border: none; border-radius: 8px;
+      background: #f44336; color: #fff; cursor: pointer;
+    }
+  </style>
 </head>
-
 <body>
 
-<div id="status">Нажми для старта</div>
+  <!-- Экран запроса разрешений -->
+  <div id="permission-overlay" class="overlay">
+    <h2>AR: Уклоняйся от блоков</h2>
+    <p>Игра использует камеру и GPS. Разрешите доступ к геолокации и камере, затем нажмите «Начать».</p>
+    <button id="btn-start" disabled>Начать</button>
+    <div class="status" id="permission-status">Запрос разрешений…</div>
+  </div>
 
-<div id="overlay" onclick="startApp()">
-    <div>
-        <h2>AR Dodge (Stable)</h2>
-        <p>Нажми для старта</p>
-    </div>
-</div>
+  <!-- Счёт в игре -->
+  <div id="score-panel">Очки: 0</div>
 
-<a-scene embedded arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-renderer="logarithmicDepthBuffer: true;"
-vr-mode-ui="enabled: false">
-    <!-- <a-sky color="#111"></a-sky> -->
+  <!-- Game Over -->
+  <div id="game-over-panel">
+    <h2>Игра окончена</h2>
+    <p id="game-over-text">Счёт: 0</p>
+    <button id="btn-restart">Заново</button>
+  </div>
 
-    <a-entity light="type: ambient; intensity: 0.7"></a-entity>
-    <a-entity light="type: directional; intensity: 0.8" position="1 1 1"></a-entity>
+  <a-scene
+    id="ar-scene"
+    embedded
+    vr-mode-ui="enabled: false"
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+    style="display: none;"
+  >
+    <!-- Камера: Fake world anchor (gps-projected = первая позиция как origin), сглаживание ориентации -->
+    <a-camera
+      id="ar-camera"
+      look-controls-enabled="false"
+      arjs-look-controls="smoothingFactor: 0.12"
+      gps-projected-camera="gpsMinDistance: 3; positionMinAccuracy: 50; gpsTimeInterval: 500"
+      gps-position-smoother="factor: 0.14"
+    ></a-camera>
 
-    <a-camera gps-new-camera rotation-reader>
-        <a-entity id="scoreText"
-            position="0 0.8 -2"
-            troika-text="value: Очки: 0; align: center; fontSize: 0.15; color: #fff;">
-        </a-entity>
-    </a-camera>
+    <!-- Спавнер блоков и логика игры (мировые координаты относительно anchor) -->
+    <a-entity id="ar-block-spawner" ar-block-spawner></a-entity>
+  </a-scene>
 
-    <a-entity game-logic></a-entity>
-</a-scene>
+  <script>
+    (function () {
+      const PermissionStatus = { NONE: 0, CAMERA: 1, GPS: 2, BOTH: 3 };
+      let permissionState = PermissionStatus.NONE;
+      const overlay = document.getElementById('permission-overlay');
+      const btnStart = document.getElementById('btn-start');
+      const statusEl = document.getElementById('permission-status');
+      const arScene = document.getElementById('ar-scene');
 
+      function updateStatus() {
+        if (permissionState === PermissionStatus.BOTH) {
+          statusEl.textContent = 'Готово. Нажмите «Начать».';
+          btnStart.disabled = false;
+        } else {
+          const parts = [];
+          if ((permissionState & PermissionStatus.CAMERA) === 0) parts.push('камера');
+          if ((permissionState & PermissionStatus.GPS) === 0) parts.push('GPS');
+          statusEl.textContent = 'Ожидание: ' + parts.join(', ');
+        }
+      }
+
+      function requestCamera() {
+        return navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+          .then(function () {
+            permissionState |= PermissionStatus.CAMERA;
+            updateStatus();
+          })
+          .catch(function (e) {
+            statusEl.textContent = 'Ошибка камеры: ' + (e.message || 'нет доступа');
+          });
+      }
+
+      function requestGPS() {
+        return new Promise(function (resolve) {
+          if (!navigator.geolocation) {
+            statusEl.textContent = 'Геолокация не поддерживается';
+            resolve();
+            return;
+          }
+          navigator.geolocation.getCurrentPosition(
+            function () {
+              permissionState |= PermissionStatus.GPS;
+              updateStatus();
+              resolve();
+            },
+            function (e) {
+              statusEl.textContent = 'Ошибка GPS: ' + (e.message || 'нет доступа');
+              resolve();
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+          );
+        });
+      }
+
+      btnStart.addEventListener('click', function () {
+        overlay.classList.add('hidden');
+        arScene.style.display = 'block';
+      });
+
+      Promise.all([requestCamera(), requestGPS()]).then(updateStatus);
+      updateStatus();
+    })();
+
+    // ——— Компонент: сглаживание позиции камеры по GPS (экспоненциальное сглаживание) ———
+    AFRAME.registerComponent('gps-position-smoother', {
+      schema: {
+        factor: { type: 'number', default: 0.15 }
+      },
+      init: function () {
+        this.smoothedPosition = new THREE.Vector3(0, 0, 0);
+        this.initialized = false;
+      },
+      tick: function () {
+        const pos = this.el.object3D.position;
+        if (!this.initialized) {
+          this.smoothedPosition.set(pos.x, pos.y, pos.z);
+          this.initialized = true;
+          return;
+        }
+        const k = this.data.factor;
+        this.smoothedPosition.x += (pos.x - this.smoothedPosition.x) * k;
+        this.smoothedPosition.y += (pos.y - this.smoothedPosition.y) * k;
+        this.smoothedPosition.z += (pos.z - this.smoothedPosition.z) * k;
+        this.el.object3D.position.copy(this.smoothedPosition);
+      }
+    });
+
+    // ——— Компонент: спавн блоков в мировых координатах (Fake world anchor), коллизия с камерой ———
+    AFRAME.registerComponent('ar-block-spawner', {
+      schema: {
+        interval: { default: 2000 },
+        laneOffset: { default: 2.5 },
+        lanes: { default: 3 },
+        startZ: { default: -25 },
+        endZ: { default: 8 },
+        blockSpeed: { default: 12 },
+        hitRadius: { default: 1.4 }
+      },
+      init: function () {
+        this.lastSpawn = -3000;
+        this.score = 0;
+        this.gameOver = false;
+        this.speedMultiplier = 1;
+        this.sceneEl = this.el.sceneEl;
+        this.camera = document.querySelector('#ar-camera');
+        this.poolSize = 12;
+        this.blocks = [];
+        for (let i = 0; i < this.poolSize; i++) {
+          const box = document.createElement('a-entity');
+          box.setAttribute('geometry', 'primitive: box; width: 1.2; height: 1.2; depth: 1.2');
+          box.setAttribute('material', 'color: #8B4513; metalness: 0.3; roughness: 0.7');
+          box.setAttribute('visible', 'false');
+          this.sceneEl.appendChild(box);
+          this.blocks.push({ el: box, active: false });
+        }
+        const scorePanel = document.getElementById('score-panel');
+        const gameOverPanel = document.getElementById('game-over-panel');
+        const gameOverText = document.getElementById('game-over-text');
+        const btnRestart = document.getElementById('btn-restart');
+        this.updateScoreUI = function () {
+          scorePanel.textContent = 'Очки: ' + this.score;
+        };
+        this.showGameOver = function () {
+          gameOverText.textContent = 'Счёт: ' + this.score;
+          gameOverPanel.classList.add('visible');
+        };
+        btnRestart.addEventListener('click', function () { location.reload(); });
+      },
+      tick: function (time, dt) {
+        if (this.gameOver) return;
+        const delta = dt / 1000;
+        const moveZ = this.data.blockSpeed * this.speedMultiplier * delta;
+
+        for (let i = 0; i < this.blocks.length; i++) {
+          const b = this.blocks[i];
+          if (!b.active) continue;
+          const pos = b.el.object3D.position;
+          pos.z += moveZ;
+          if (pos.z > this.data.endZ) {
+            b.active = false;
+            b.el.setAttribute('visible', false);
+            this.score++;
+            if (this.score % 5 === 0) this.speedMultiplier += 0.12;
+            this.updateScoreUI();
+          }
+        }
+
+        this.checkCollisions();
+        if (time - this.lastSpawn > this.data.interval) {
+          this.spawnBlock();
+          this.lastSpawn = time;
+        }
+      },
+      checkCollisions: function () {
+        if (this.gameOver || !this.camera) return;
+        const camPos = this.camera.object3D.position;
+        const r = this.data.hitRadius;
+        for (let i = 0; i < this.blocks.length; i++) {
+          const b = this.blocks[i];
+          if (!b.active) continue;
+          const p = b.el.object3D.position;
+          const dx = p.x - camPos.x, dy = p.y - camPos.y, dz = p.z - camPos.z;
+          if (dx * dx + dy * dy + dz * dz < r * r) {
+            this.gameOver = true;
+            this.showGameOver();
+            return;
+          }
+        }
+      },
+      spawnBlock: function () {
+        const laneIndex = Math.floor(Math.random() * this.data.lanes);
+        const x = (laneIndex - Math.floor(this.data.lanes / 2)) * this.data.laneOffset;
+        let b = this.blocks.find(function (item) { return !item.active; });
+        if (!b) return;
+        b.el.object3D.position.set(x, 1.2, this.data.startZ);
+        b.el.setAttribute('visible', true);
+        b.active = true;
+        if (Math.random() < 0.3) {
+          const otherLane = (Math.floor(Math.random() * this.data.lanes) - Math.floor(this.data.lanes / 2)) * this.data.laneOffset;
+          if (otherLane !== x) {
+            b = this.blocks.find(function (item) { return !item.active; });
+            if (b) {
+              b.el.object3D.position.set(otherLane, 1.2, this.data.startZ);
+              b.el.setAttribute('visible', true);
+              b.active = true;
+            }
+          }
+        }
+      }
+    });
+
+  </script>
 </body>
 </html>
