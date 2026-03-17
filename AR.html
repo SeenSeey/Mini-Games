@@ -36,13 +36,28 @@
         // РАЗБЛОКИРОВКА АУДИО И СКРЫТИЕ OVERLAY
         document.addEventListener('DOMContentLoaded', () => {
             const overlay = document.getElementById('overlay');
-            overlay.addEventListener('click', () => {
-                overlay.style.display = 'none';
-                
-                // Принудительно стартуем AudioContext браузера по тапу
+            
+            overlay.addEventListener('click', async () => {
+                // 1. Пытаемся разбудить аудио
                 const ctx = THREE.AudioContext.getContext();
-                if (ctx.state === 'suspended') {
-                    ctx.resume();
+                if (ctx.state === 'suspended') ctx.resume();
+
+                // 2. ЯВНО запрашиваем GPS через стандартное API браузера
+                if ("geolocation" in navigator) {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            console.log("GPS доступ разрешен пользователем");
+                            // Скрываем оверлей только после успешного (или хотя бы инициированного) запроса
+                            overlay.style.display = 'none';
+                        },
+                        (err) => {
+                            console.error("Ошибка GPS или отказ:", err);
+                            alert("Для игры необходим GPS. Пожалуйста, разреши доступ в настройках браузера.");
+                        },
+                        { enableHighAccuracy: true }
+                    );
+                } else {
+                    alert("Твой браузер не поддерживает GPS.");
                 }
             });
         });
