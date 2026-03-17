@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>AR Dodge Blocks</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/ar.js@3.4.5/aframe/build/aframe-ar.js"></script>
+    <script src="https://unpkg.com/aframe-troika-text/dist/aframe-troika-text.min.js"></script>
+
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: system-ui, sans-serif;
+            background: black;
+        }
+
+        #overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            color: white;
+            text-align: center;
+            font-size: 1.2rem;
+            cursor: pointer;
+        }
+    </style>
+
+    <script>
+        // РАЗБЛОКИРОВКА АУДИО И СКРЫТИЕ OVERLAY
+        document.addEventListener('DOMContentLoaded', () => {
+            const overlay = document.getElementById('overlay');
+            overlay.addEventListener('click', () => {
+                overlay.style.display = 'none';
+                
+                // Принудительно стартуем AudioContext браузера по тапу
+                const ctx = THREE.AudioContext.getContext();
+                if (ctx.state === 'suspended') {
+                    ctx.resume();
+                }
+            });
+        });
+
+        // БЕЗОПАСНОЕ ВОСПРОИЗВЕДЕНИЕ АУДИО
+        function playSoundSafe(entity) {
+            if (!entity || !entity.components.sound) return;
+            const sound = entity.components.sound;
+            if (sound.isPlaying) sound.stopSound();
+            sound.playSound();
+        }
+
+        // ГЕНЕРАЦИЯ КООРДИНАТ (Примерно 15-20 метров от игрока)
+        function getRandomNearbyLocation(lat, lon, radius = 0.00015) {
+            return {
+                lat: lat + (Math.random() - 0.5) * radius * 2,
+                lon: lon + (Math.random() - 0.5) * radius * 2
+            };
+        }
+
+        // AR ИГРА (КОМПОНЕНТ)
+        AFRAME.registerComponent("ar-game", {
+            init: function() {
+                this.score = 0;
+                this.gameOver = false;
+                this.gpsReady = false;
+                this.blocks = [];
+                
+                this.spawnInterval = 3000; // Спавн каждые 3 секунды
+                this.lastSpawnTime = 0;
+                this.blockLifetime = 10000; // Блок исчезает через 10 сек (Успешный Dodge)
+
+                this.camera = document.querySelector("[gps-new-camera]");
+                this.scoreText = document.querySelector("#scoreText");
+                this.gameOverPanel = document.querySelector("#gameOverPanel");
+                this.gameOverText = document.querySelector("#gameOverText");
+
+                this.audioDeath = document.querySelector("#deathSound");
+                this.audioSuccess = document.querySelector("#successSound");
+
+                // Ждем пока GPS найдет спутники
+                window.addEventListener('gps-camera-update-position', () => {
+                    if (!this.gpsReady) {
+                        console.log("GPS зафиксирован! Игра начинается.");
+                        this.gpsReady = true;
+                    }
+                });
+            },
+
+            tick: function(time, timeDelta) {
+                if (this.gameOver || !this.gpsReady) return;
+
+                // 1. Спавн блоков по таймеру движка (без setInterval)
+                if (time - this.lastSpawnTime > this.spawnInterval) {
+                    this.spawnBlock(time);
+                    this.lastSpawnTime = time;
+                }
+
+                // 2. Проверка дистанции и времени жизни
+                const playerPos = this.camera.object3D.position;
+
+                // Перебираем массив с конца, чтобы безопасно удалять элементы в процессе
+                for (let i = this.blocks.length - 1; i >= 0; i--) {
+                    let b = this.blocks[i];
+
+                    // Ждем пока AR.js высчитает реальные 3D координаты из GPS
+                    if (!b.el.object3D || b.el.object3D.position.length() === 0) continue;
+
+                    // Дистанция в метрах пространства Three.js
+                    let distance = playerPos.distanceTo(b.el.object3D.position);
+
+                    // Если подошли ближе чем на 1.5 метра (игнорируем 0, т.к. это могут быть неинициализированные координаты)
+                    if (distance < 1.5 && distance > 0.1) {
+                        this.onHit();
+                        return; // Прерываем цикл, игра окончена
+                    }
+
+                    // Если блок "прожил" 10 секунд и мы его не задели — засчитываем очко и удаляем
+                    if (time - b.spawnTime > this.blockLifetime) {
+                        this.onPassed(b.el, i);
+                    }
+                }
+            },
+
+            spawnBlock: function(currentTime) {
+                const cam = this.camera.components["gps-new-camera"];
+                if (!cam || !cam.currentCoords) return;
+
+                const coords = cam.currentCoords;
+                const loc = getRandomNearbyLocation(coords.latitude, coords.longitude, 0.00015);
+
+                const block = document.createElement("a-entity");
+                block.setAttribute("gltf-model", "#stoneModel");
+
+                let scale = Math.random() * 0.8 + 0.6;
+                // 5% шанс на огромный блок
+                if (Math.random() < 0.05) {
+                    scale = Math.random() * 1.5 + 1.5;
+                }
+
+                block.setAttribute("scale", `${scale} ${scale} ${scale}`);
+                block.setAttribute("rotation", `0 ${Math.random() * 360} 0`);
+                block.setAttribute("gps-new-entity-place", `latitude: ${loc.lat}; longitude: ${loc.lon};`);
+
+                this.el.sceneEl.appendChild(block);
+
+                // Сохраняем блок и время его создания
+                this.blocks.push({
+                    el: block,
+                    spawnTime: currentTime
+                });
+            },
+
+            onPassed: function(blockEl, index) {
+                this.score++;
+                this.scoreText.setAttribute("troika-text", "value", `Очки: ${this.score}`);
+                playSoundSafe(this.audioSuccess);
+
+                // ОЧИСТКА ПАМЯТИ: удаляем узел из DOM и объект из массива
+                blockEl.parentNode.removeChild(blockEl);
+                this.blocks.splice(index, 1);
+            },
+
+            onHit: function() {
+                this.gameOver = true;
+                
+                this.gameOverPanel.setAttribute("visible", "true");
+                this.gameOverText.setAttribute("troika-text", "value", `Игра окончена\nСчёт: ${this.score}`);
+                
+                playSoundSafe(this.audioDeath);
+            }
+        });
+    </script>
+</head>
+<body>
+
+    <div id="overlay">
+        <p>Разреши доступ к камере и GPS,<br>затем нажми на экран для старта</p>
+    </div>
+
+    <a-scene embedded arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;">
+        
+        <a-assets>
+            <a-asset-item id="stoneModel" src="models/concrete_obstacle.glb"></a-asset-item>
+            <audio id="deathAudio" src="sounds/death.mp3" preload="auto"></audio>
+            <audio id="successAudio" src="sounds/success dodge.mp3" preload="auto"></audio>
+        </a-assets>
+
+        <a-entity id="deathSound" sound="src: #deathAudio; positional: false"></a-entity>
+        <a-entity id="successSound" sound="src: #successAudio; positional: false"></a-entity>
+
+        <a-camera gps-new-camera rotation-reader>
+            
+            <a-entity
+                id="scoreText"
+                position="0 0.8 -2"
+                troika-text="value: Очки: 0; align: center; color: #fff; fontSize: 0.15; outlineWidth: 0.01; outlineColor: black;">
+            </a-entity>
+
+            <a-entity
+                id="gameOverPanel"
+                visible="false"
+                position="0 0 -2"
+                geometry="primitive: plane; width: 2; height: 1"
+                material="color: black; opacity: 0.85">
+                
+                <a-entity
+                    id="gameOverText"
+                    position="0 0 0.01"
+                    troika-text="align: center; color: white; fontSize: 0.15">
+                </a-entity>
+            </a-entity>
+            
+        </a-camera>
+
+        <a-entity ar-game></a-entity>
+
+    </a-scene>
+
+</body>
+</html>
