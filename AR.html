@@ -21,14 +21,14 @@
     -webkit-user-select: none;
   }
 
-  /* ── Фикс растяжения видео AR.js ── */
+  /* ── Видео AR.js: пропорциональное покрытие без искажений ── */
   video {
     position: fixed !important;
-    top: 50% !important; left: 50% !important;
-    transform: translate(-50%, -50%) !important;
-    min-width: 100vw !important; min-height: 100vh !important;
-    width: auto !important; height: auto !important;
+    top: 0 !important; left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
     object-fit: cover !important;
+    object-position: center center !important;
     z-index: -1 !important;
   }
 
@@ -354,11 +354,10 @@ function fixVideoStretch() {
     document.querySelectorAll('video').forEach(v => {
       v.style.cssText = [
         'position:fixed!important',
-        'top:50%!important', 'left:50%!important',
-        'transform:translate(-50%,-50%)!important',
-        'min-width:100vw!important', 'min-height:100vh!important',
-        'width:auto!important', 'height:auto!important',
+        'top:0!important', 'left:0!important',
+        'width:100vw!important', 'height:100vh!important',
         'object-fit:cover!important',
+        'object-position:center center!important',
         'z-index:-1!important'
       ].join(';');
     });
