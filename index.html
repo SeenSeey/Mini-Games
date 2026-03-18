@@ -91,6 +91,9 @@ function setupAudioUnlock() {
     overlay.style.display = "none";
     const scene = document.querySelector("a-scene");
     if (scene && scene.audioContext) scene.audioContext.resume();
+    // Скрываем подсказку — игрок уже взаимодействовал с экраном
+    const hint = document.querySelector("#hint-text");
+    if (hint) hint.setAttribute("visible", false);
   }
   window.addEventListener("click",      unlock, { once: true });
   window.addEventListener("keydown",    unlock, { once: true });
@@ -207,6 +210,16 @@ AFRAME.registerComponent("block-spawner", {
     this.audioRestart = document.querySelector("#restartSound");
     this.audioSuccess = document.querySelector("#successDodgeSound");
 
+    // Проверяем обязательные элементы сцены
+    if (!this.player || !this.scoreText || !this.gameOverPanel || !this.gameOverText) {
+      console.error("block-spawner: не найдены обязательные элементы сцены");
+      return;
+    }
+
+    // Pre-allocated Box3 — переиспользуются каждый тик без аллокаций
+    this._playerBox = new THREE.Box3();
+    this._blockBox  = new THREE.Box3();
+
     this.poolSize = 15;
     this.blocks   = [];
     const scene   = this.el.sceneEl;
@@ -251,16 +264,14 @@ AFRAME.registerComponent("block-spawner", {
   checkCollisions: function () {
     if (this.gameOver || !this.player) return;
 
-    const playerBox = new THREE.Box3();
-    playerBox.setFromObject(this.player.object3D);
-    playerBox.expandByScalar(-0.1);
+    this._playerBox.setFromObject(this.player.object3D);
+    this._playerBox.expandByScalar(-0.1);
 
     for (let i = 0; i < this.blocks.length; i++) {
       const b = this.blocks[i];
       if (b.active) {
-        const blockBox = new THREE.Box3();
-        blockBox.setFromObject(b.model.object3D);
-        if (playerBox.intersectsBox(blockBox)) {
+        this._blockBox.setFromObject(b.model.object3D);
+        if (this._playerBox.intersectsBox(this._blockBox)) {
           this.onHit();
           return;
         }
@@ -299,7 +310,7 @@ AFRAME.registerComponent("block-spawner", {
 
   onPassed: function () {
     this.score++;
-    if (this.score % 5 === 0) this.speedMultiplier += 0.15;
+    if (this.score % 5 === 0) this.speedMultiplier = Math.min(this.speedMultiplier + 0.15, 3.0);
     playSoundSafe(this.audioSuccess);
     this.scoreText.setAttribute("troika-text", "value", `Очки: ${this.score}`);
   },
@@ -340,7 +351,7 @@ AFRAME.registerComponent("block-spawner", {
         playSoundSafe(this.audioRestart);
         setTimeout(() => location.reload(), 400);
       }
-    });
+    }, { once: true });
   }
 });
 
@@ -433,7 +444,7 @@ AFRAME.registerComponent("hint-pulse", {
     id="player-rig"
     player-controller
     position="0 1.6 4">
-      <a-entity camera look-controls wasd-controls-enabled="false"></a-entity>
+      <a-entity camera look-controls wasd-controls="enabled:false"></a-entity>
       <a-box
         id="player-body"
         position="0 -1.2 0"
@@ -452,6 +463,7 @@ AFRAME.registerComponent("hint-pulse", {
   </a-entity>
 
   <a-entity
+    id="hint-text"
     position="0 2.3 -1.5"
     hint-pulse
     troika-text="value: ◀ ▶ кнопки внизу экрана;align:center;color:#ffeb3b;fontSize:0.18">
